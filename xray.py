@@ -1,69 +1,118 @@
-from nicegui import ui
+#!/usr/bin/env python3
+import argparse
+import asyncio
+from datetime import datetime
+import json
+import sys
+from motor.motor_asyncio import AsyncIOMotorClient
+from pw_simulator.pw_runner.runner import execute_python_code
 
-left_open = True
-right_open = True
-bottom_open = True
+MONGO_URI = "mongodb://mongo:mongo@192.168.99.97:27017"
+DB_NAME = "xray"
 
-def toggle_left():
-    global left_open
-    left_open = not left_open
-    left_panel.visible = left_open
-    left_open_btn.visible = not left_open
+def now_iso():
+    return datetime.utcnow().isoformat()
 
-def toggle_right():
-    global right_open
-    right_open = not right_open
-    right_panel.visible = right_open
-    right_open_btn.visible = not right_open
+async def get_db():
+    client = AsyncIOMotorClient(MONGO_URI)
+    return client[DB_NAME]
 
-def toggle_bottom():
-    global bottom_open
-    bottom_open = not bottom_open
-    bottom_panel.visible = bottom_open
-    bottom_open_btn.visible = not bottom_open
+async def find_script(db, project_id, script_version=None):
+    if script_version is not None:
+        script = await db.scripts.find_one({
+            "projectId": project_id,
+            "version": int(script_version)
+        })
+        if script:
+            return script
+        print(f"[ERROR] Script version {script_version} not found in project {project_id}.")
+        sys.exit(1)
+    # Get latest version
+    scripts = await db.scripts.find({"projectId": project_id}).sort("version", -1).to_list(1)
+    if scripts:
+        return scripts[0]
+    print(f"[ERROR] No script found in project {project_id}.")
+    sys.exit(1)
 
-ui.dark_mode()
+async def save_execution(db, execution):
+    await db.executions.insert_one(execution)
+    print(f"[INFO] Execution saved with id: {execution['executionId']}")
 
-with ui.row().style('height: 100vh; overflow: hidden;'):
-    # SOL PANEL
-    with ui.column().style('width: 220px; background: #222831; color: #fff; border-right:1px solid #393e46;').bind_visibility(lambda: left_open) as left_panel:
-        with ui.row().style('justify-content: flex-end;'):
-            ui.button(icon='close', on_click=toggle_left, color='grey').props('flat round dense').style('margin:2px 0 2px 0; padding:0; min-width:22px;')
-        ui.label('EXPLORER').style('font-weight:bold; margin-top:8px;')
-        ui.separator()
-        ui.label('.profile')
-        ui.label('.bashrc')
-        ui.label('.bash_logout')
-        ui.separator()
-        ui.label('Tool Settings').style('font-weight:bold; margin-top:8px;')
-        ui.input('System Prompt', value='You are a helpful assistant.')
-        ui.select(['gpt-4.1-nano', 'gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'], value='gpt-4.1-nano', label='Model')
-    left_open_btn = ui.button(icon='chevron_right', on_click=toggle_left, color='grey').props('flat round dense').style('margin-left:4px; min-width:22px;').bind_visibility(lambda: not left_open)
+async def run(project_id, script_version, max_count):
+    db = await get_db()
+    script = await find_script(db, project_id, script_version)
+    print(f"[INFO] Running script (project: {project_id}, version: {script['version']}, id: {script['scriptId']}, max_count: {max_count})")
+    # Kod çalıştır
+    result = await execute_python_code(
+        script["code"],
+        no_prints=False,
+        max_count=max_count
+    )
+    output_json = result.get("result")
+    logs = result.get("logs", "")
+    error = ""
+    if output_json and isinstance(output_json, dict):
+        error = output_json.get("error", "")
+    if not error and "traceback" in logs.lower():
+        error = logs
 
-    # ANA PANEL
-    with ui.column().style('flex: 1; min-width:0; background:#1e1e1e; color:#eee; position:relative;'):
-        with ui.row().style('padding:0 0 4px 0; border-bottom:1px solid #393e46;'):
-            ui.label('Chat').style('font-size:1.1em; margin: 8px 12px;')
-            ui.label('Python Canvas').style('font-size:1.1em; margin: 8px 12px; color:#999;')
-        ui.textarea(label='Chat', placeholder='Type your message...', rows=3)
-        ui.button('Send')
-        ui.button('Clear Chat')
-        right_open_btn = ui.button(icon='chevron_left', on_click=toggle_right, color='grey').props('flat round dense').style('position:absolute; top:4px; right:0; min-width:22px; z-index:10;').bind_visibility(lambda: not right_open)
-        bottom_open_btn = ui.button(icon='expand_less', on_click=toggle_bottom, color='grey').props('flat round dense').style('position:absolute; left:50%; bottom:4px; min-width:22px; transform:translateX(-50%); z-index:10;').bind_visibility(lambda: not bottom_open)
+    from project.utils import nanoid  # DB util fonksiyonun varsa kullan
+    execution_id = nanoid(14) if "nanoid" in globals() else script["scriptId"] + "EXE"
 
-    # SAĞ PANEL
-    with ui.column().style('width: 260px; background: #222831; color: #fff; border-left:1px solid #393e46;').bind_visibility(lambda: right_open) as right_panel:
-        with ui.row().style('justify-content: flex-end;'):
-            ui.button(icon='close', on_click=toggle_right, color='grey').props('flat round dense').style('margin:2px 0 2px 0; padding:0; min-width:22px;')
-        ui.label('Sağ Panel').style('font-weight:bold; margin-top:8px;')
-        ui.json({'info': 'Buraya inspector veya başka içerik ekleyebilirsin.'})
+    now = now_iso()
+    execution = {
+        "executionId": execution_id,
+        "projectId": project_id,
+        "scriptId": script["scriptId"],
+        "scriptVersion": script["version"],
+        "status": "error" if error else "success",
+        "startTime": now,
+        "endTime": now,
+        "duration": 1,
+        "resultCount": len(output_json.get("data", [])) if output_json and isinstance(output_json, dict) and "data" in output_json else 0,
+        "output": json.dumps(output_json) if output_json else "",
+        "logs": logs,
+        "errorMessage": error or "",
+        "result": output_json if isinstance(output_json, dict) else {},
+    }
+    await save_execution(db, execution)
+    print_execution(execution)
 
-# ALT PANEL (Terminal)
-with ui.row().style('position:fixed; left:0; right:0; bottom:0; background:#23272f; color:#eee; border-top:1px solid #393e46; z-index:20; height:140px;').bind_visibility(lambda: bottom_open) as bottom_panel:
-    with ui.column().style('width:100%;'):
-        with ui.row().style('justify-content:flex-end;'):
-            ui.button(icon='close', on_click=toggle_bottom, color='grey').props('flat round dense').style('margin:2px 0 2px 0; padding:0; min-width:22px;')
-        ui.label('TERMINAL • OUTPUT • DEBUG CONSOLE • PORTS').style('font-size:0.95em; margin-left:8px;')
-        ui.markdown('```bash\ncoder@xxxx:~$ \n```')
+def print_execution(exe):
+    print("\n==== EXECUTION RESULT ====")
+    print(f"Status      : {exe.get('status')}")
+    print(f"Script ver. : {exe.get('scriptVersion')}")
+    print(f"Started at  : {exe.get('startTime')}")
+    print(f"Ended at    : {exe.get('endTime')}")
+    print(f"Duration    : {exe.get('duration')} s")
+    print(f"Result count: {exe.get('resultCount')}")
+    print("\n--- Output ---")
+    try:
+        output = exe.get("output", "")
+        if output:
+            try:
+                out_obj = json.loads(output)
+                print(json.dumps(out_obj, ensure_ascii=False, indent=2))
+            except Exception:
+                print(output)
+        else:
+            print("(No output)")
+    except Exception:
+        print("(Could not parse output)")
+    if exe.get("logs"):
+        print(f"\n--- Logs ---\n{exe['logs']}")
+    if exe.get("errorMessage"):
+        print(f"\n--- ERROR ---\n{exe['errorMessage']}")
+    print("========================\n")
 
-ui.run()
+def main():
+    parser = argparse.ArgumentParser(description="XRAY CLI - Run a script for a project (direct db, no API)")
+    parser.add_argument("project",   help="Project ID (required)")
+    parser.add_argument("--script-version", "-s", required=False, help="Script version (optional)")
+    parser.add_argument("--max-count", "-m",required=False ,type=int, default=3, help="Maximum count (default: 3)")
+    args = parser.parse_args()
+    asyncio.run(run(args.project, args.script_version, args.max_count))
+
+
+if __name__ == "__main__":
+    main()

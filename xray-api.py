@@ -8,6 +8,10 @@ from tool_router import ToolRouter
 from tool_stdio_client import ToolStdioClient
 from tool_websocket_client import ToolWebSocketClient
 
+from project.api import router as project_router
+from project.init import setup_all
+
+
 import os
 import asyncio
 import logging
@@ -27,14 +31,18 @@ ws_clients = set()  # Aktif frontend websocket bağlantıları
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    tool_clients = []
+    setup_all(app, tool_clients=tool_clients)
+
     MCP_REMOTE_CLIENTS = [
         ToolStdioClient(server_id="investigator", command="npx", args=["-y", "@playwright/mcp@latest"]),
-        ToolStdioClient(server_id="simulator", command="/Users/ahmet/.venv/bin/python", args=["pw_simulator/main.py"]),
+        ToolStdioClient(server_id="simulator", command="python", args=["pw_simulator/main.py"]),
     ]
     # Tek bir WebSocketClient, memory ve tool events için
     app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
     app.state.router = ToolRouter([
         *MCP_REMOTE_CLIENTS,
+        *tool_clients,
         app.state.ui_tool_client
     ])
     await app.state.router.__aenter__()
@@ -51,6 +59,8 @@ async def lifespan(app: FastAPI):
     await app.state.router.__aexit__(None, None, None)
 
 app = FastAPI(lifespan=lifespan)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -172,9 +182,13 @@ async def update_message(msg_id: str, request: Request):
     for msg in messages:
         if msg.get("id") == msg_id:
             msg["content"] = content
+            # Eğer mesajda id yoksa, yeni id ekle
+            if not msg.get("id"):
+                msg["id"] = app.state.memory._new_id()
             app.state.memory._notify_observers()
-            return {"status": "ok", "message": "Updated."}
+            return {"status": "ok", "message": "Updated.", "id": msg["id"]}
     return {"error": "message not found"}
+
 
 @app.post("/api/chat/insert_after")
 async def insert_after_message(request: Request):
@@ -310,6 +324,25 @@ async def reset_state():
     app.state.memory._notify_observers()
     return {"status": "ok", "message": "Context/memory resetlendi."}
 
+@app.get("/api/chat/prompts")
+async def get_chat_prompts():
+    # Tüm mesajları, olduğu gibi (tüm roller dahil) döndür
+    return app.state.memory.get_all_messages()
+
+
+@app.post("/api/chat/prompts")
+async def set_chat_prompts(request: Request):
+    data = await request.json()
+    prompts = data.get("prompts", [])
+    memory = app.state.memory
+    memory.clear()
+    for prm in prompts:
+        if prm["role"] in ("system", "user"):
+            memory.add_message({"role": prm["role"], "content": prm["content"]})
+    memory._notify_observers()
+    return {"status": "ok"}
+
+
 @app.get("/api/tools")
 async def list_tools():
     tools = await app.state.router.list_tools()
@@ -326,6 +359,7 @@ async def run_tool(request: Request):
         return {"output": result}
     except Exception as e:
         return {"error": str(e)}
+
 
 if __name__ == "__main__":
     import uvicorn

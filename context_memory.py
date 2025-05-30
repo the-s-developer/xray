@@ -1,5 +1,18 @@
 from typing import Any, Dict, List, Optional, Callable
 import uuid
+from nanoid import generate
+
+ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+NANOID_SIZE = 21
+
+def nanoid(size=NANOID_SIZE):
+    return generate(ALPHABET, size)
+
+def ensure_id(msg):
+    msg = dict(msg)  # Kopyala (güvenlik için)
+    msg["id"] = nanoid(8)
+    return msg
+
 
 class ContextMemoryManager:
     def __init__(
@@ -17,10 +30,8 @@ class ContextMemoryManager:
         if system is not None:
             self.set_system_message(system)
 
-    def _new_id(self) -> str:
-        # Kısa ama rastgele bir id, 12 karakter (uuid4)
-        return str(uuid.uuid4())[:12]
 
+    
     def add_observer(self, callback: Callable) -> None:
         print("add observer")
         self._observers.append(callback)
@@ -35,27 +46,23 @@ class ContextMemoryManager:
 
     def set_system_message(self, content: str) -> None:
         self._messages = [m for m in self._messages if m["role"] != "system"]
-        self._messages.insert(0, {
-            "id": self._new_id(),
+        self._messages.insert(0, ensure_id({
             "role": "system",
             "content": content.strip()
-        })
+        }))
         self._notify_observers()
 
     def add_user_prompt(self, content: str) -> None:
-        self._messages.append({
-            "id": self._new_id(),
-            "role": "user",
-            "content": content
-        })
+        msg = {"role": "user", "content": content}
+        msg = ensure_id(msg)  # Burada her zaman yeni id üret
+        self._messages.append(msg)
         self._notify_observers()
 
     def add_assistant_reply(self, content: str) -> None:
-        self._messages.append({
-            "id": self._new_id(),
+        self._messages.append(ensure_id({
             "role": "assistant",
             "content": content.strip()
-        })
+        }))
         self._notify_observers()
 
     def add_tool_calls(self, partial_calls: Dict[int, Dict[str, Any]]) -> None:
@@ -70,21 +77,19 @@ class ContextMemoryManager:
             }
             for call in partial_calls.values()
         ]
-        self._messages.append({
-            "id": self._new_id(),
+        self._messages.append(ensure_id({
             "role": "assistant",
             "content": None,
             "tool_calls": tool_calls
-        })
+        }))
         self._notify_observers()
 
     def add_tool_result(self, tool_call_id: str, content: str) -> None:
-        self._messages.append({
-            "id": self._new_id(),
+        self._messages.append(ensure_id({
             "role": "tool",
             "tool_call_id": tool_call_id,
             "content": content.strip()
-        })
+        }))
         self._notify_observers()
 
     def get_all_messages(self) -> List[Dict[str, Any]]:
@@ -101,14 +106,17 @@ class ContextMemoryManager:
         self._messages = []
         self._notify_observers()
 
+
     def set_messages(self, messages):
-        """Memory’yi verilen mesajlarla sıfırlar (deepcopy ile)."""
-        self._messages = [m.copy() for m in messages]
+        # Her mesajı kendi id’siyle değil, YENİ id ile memory’ye ekle!
+        self._messages = [ensure_id(m.copy()) for m in messages]
+        print("-----------------set messages",self._messages)
         self._notify_observers()
+
 
     def add_message(self, msg):
         """Tek bir mesajı ekler, observerlara hemen bildirmez (isteğe bağlı!)."""
-        self._messages.append(msg)
+        self._messages.append(ensure_id(msg.copy()))
         
     def dump(self) -> str:
         lines = []
