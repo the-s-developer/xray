@@ -1,4 +1,3 @@
-# openai_agent.py
 from __future__ import annotations
 import json
 import time
@@ -9,16 +8,29 @@ from tool_client import ToolClient
 from context_memory import ContextMemoryManager
 from status_enum import AgentStatus
 
-OPENAI_BASE_URL = None
-
 class OpenAIAgent:
-    def __init__(self, api_key: str, on_status_update: Optional[Callable[[dict], None]] = None):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        tool_client: ToolClient,
+        memory_manager: ContextMemoryManager,
+        on_status_update: Optional[Callable[[dict], None]] = None,
+    ):
         self.api_key = api_key
-        self.client: Optional[AsyncOpenAI] = None
+        self.base_url = base_url
+        self.model_id = model_id
+        self.tool_client = tool_client
+        self.memory_manager = memory_manager
         self.on_status_update = on_status_update
+        self.client: Optional[AsyncOpenAI] = None
 
     async def __aenter__(self) -> "OpenAIAgent":
-        self.client = AsyncOpenAI(api_key=self.api_key, base_url=OPENAI_BASE_URL)
+        self.client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+        )
         return self
 
     async def __aexit__(self, *_):
@@ -32,11 +44,11 @@ class OpenAIAgent:
             if hasattr(maybe_coro, "__await__"):
                 await maybe_coro
 
-    def _save_context(self, memory_manager: ContextMemoryManager):
+    def _save_context(self):
         try:
             with open("context_refined.json", "w", encoding="utf-8") as f:
                 json.dump(
-                    memory_manager.get_all_messages(),
+                    self.memory_manager.get_all_messages(),
                     f,
                     ensure_ascii=False,
                     indent=2,
@@ -56,19 +68,23 @@ class OpenAIAgent:
             print("[WARN] Tool-call argümantasyon hatası:", e, "| Raw arguments:", repr(arguments))
             return {}
 
-    async def ask_stream(
+    async def ask(
         self,
-        tool_client: ToolClient,
         prompt: str,
-        memory_manager: ContextMemoryManager,
-        model: str,
-    ) -> AsyncGenerator[str, None]:
+        stream: bool = False,
+    ) -> Union[str, AsyncGenerator[str, None]]:
+        if stream:
+            return self.ask_stream(prompt)
+        else:
+            return await self.ask_non_stream(prompt)
+
+    async def ask_stream(self, prompt: str) -> AsyncGenerator[str, None]:
         if self.client is None:
             raise RuntimeError("Agent not initialized – use `async with`")
-        memory_manager.add_user_prompt(prompt)
-        tool_defs = await tool_client.list_tools()
-        memory_manager.retain_last_tool_call_pairs(3)
-        messages = memory_manager.get_all_messages()
+        self.memory_manager.add_user_prompt(prompt)
+        tool_defs = await self.tool_client.list_tools()
+        self.memory_manager.retain_last_tool_call_pairs(3)
+        messages = self.memory_manager.get_all_messages()
 
         buffer = ""
         ongoing: Dict[int, Dict[str, Any]] = {}
@@ -82,7 +98,7 @@ class OpenAIAgent:
         try:
             await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
             stream_resp = await self.client.chat.completions.create(
-                model=model,
+                model=self.model_id,
                 messages=messages,
                 tools=tool_defs,
                 stream=True,
@@ -90,7 +106,6 @@ class OpenAIAgent:
 
             async for chunk in stream_resp:
                 delta = chunk.choices[0].delta
-                # partial_assistant
                 if getattr(delta, "content", None):
                     buffer += delta.content
                     token_count += len(delta.content.split())
@@ -100,7 +115,6 @@ class OpenAIAgent:
                         "tps": current_tps()
                     })
 
-                # tool_call
                 if delta.tool_calls:
                     await self._notify_status({"state": AgentStatus.TOOL_CALLING.value, "phase": "tools"})
                     for tc in delta.tool_calls:
@@ -124,9 +138,8 @@ class OpenAIAgent:
                         "tps": current_tps()
                     })
 
-            # Finalize: assistant cevabı + tool call sonuçları
             if buffer.strip():
-                memory_manager.add_assistant_reply(buffer)
+                self.memory_manager.add_assistant_reply(buffer)
 
             if ongoing:
                 for call in ongoing.values():
@@ -135,15 +148,15 @@ class OpenAIAgent:
                     args = self._parse_tool_arguments(call)
                     if not args:
                         continue
-                    memory_manager.add_tool_calls({call["id"]: call})
+                    self.memory_manager.add_tool_calls({call["id"]: call})
                     try:
-                        result = await tool_client.call_tool(call["id"], call["name"], args)
+                        result = await self.tool_client.call_tool(call["id"], call["name"], args)
                         if not isinstance(result, str):
                             result = json.dumps(result, ensure_ascii=False)
                     except Exception as ex:
                         await self._notify_status({"state": AgentStatus.ERROR.value})
                         result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
-                    memory_manager.add_tool_result(call["id"], result)
+                    self.memory_manager.add_tool_result(call["id"], result)
                     yield json.dumps({
                         "type": "tool_result",
                         "call_id": call["id"],
@@ -159,37 +172,18 @@ class OpenAIAgent:
             await self._notify_status({"state": AgentStatus.ERROR.value})
             yield json.dumps({"type": "end", "error": str(err)})
 
-    async def ask(
-        self,
-        tool_client: ToolClient,
-        prompt: str,
-        memory_manager: ContextMemoryManager,
-        model: str,
-        stream: bool = False,
-    ) -> Union[str, AsyncGenerator[str, None]]:
-        if stream:
-            return self.ask_stream(tool_client, prompt, memory_manager, model)
-        else:
-            return await self.ask_non_stream(tool_client, prompt, memory_manager, model)
-
-    async def ask_non_stream(
-        self,
-        tool_client: ToolClient,
-        prompt: str,
-        memory_manager: ContextMemoryManager,
-        model: str,
-    ) -> str:
+    async def ask_non_stream(self, prompt: str) -> str:
         if self.client is None:
             raise RuntimeError("Agent not initialized – use `async with`")
-        memory_manager.add_user_prompt(prompt)
-        tool_defs = await tool_client.list_tools()
-        memory_manager.retain_last_tool_call_pairs(3)
-        messages = memory_manager.get_all_messages()
+        self.memory_manager.add_user_prompt(prompt)
+        tool_defs = await self.tool_client.list_tools()
+        self.memory_manager.retain_last_tool_call_pairs(3)
+        messages = self.memory_manager.get_all_messages()
 
         try:
             await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
             resp = await self.client.chat.completions.create(
-                model=model,
+                model=self.model_id,
                 messages=messages,
                 tools=tool_defs,
                 stream=False,
@@ -217,7 +211,7 @@ class OpenAIAgent:
                         entry["arguments"] += tc.function.arguments or ""
 
             if full_reply.strip():
-                memory_manager.add_assistant_reply(full_reply)
+                self.memory_manager.add_assistant_reply(full_reply)
 
             if ongoing:
                 for call in ongoing.values():
@@ -226,18 +220,18 @@ class OpenAIAgent:
                     args = self._parse_tool_arguments(call)
                     if not args:
                         continue
-                    memory_manager.add_tool_calls({call["id"]: call})
+                    self.memory_manager.add_tool_calls({call["id"]: call})
                     try:
-                        result = await tool_client.call_tool(call["id"], call["name"], args)
+                        result = await self.tool_client.call_tool(call["id"], call["name"], args)
                         if not isinstance(result, str):
                             result = json.dumps(result, ensure_ascii=False)
                     except Exception as ex:
                         await self._notify_status({"state": AgentStatus.ERROR.value})
                         result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
-                    memory_manager.add_tool_result(call["id"], result)
+                    self.memory_manager.add_tool_result(call["id"], result)
 
             await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
-            self._save_context(memory_manager)
+            self._save_context()
             return full_reply
         except Exception as err:
             await self._notify_status({"state": AgentStatus.ERROR.value})

@@ -1,0 +1,83 @@
+# === XRAY CONFIG ===
+
+xray:
+  env: dev
+  mongo_uri: ${MONGO_URI}
+  db_name: xray
+  max_script_count: 50
+
+# === MODELS ===
+models:
+  - id: gpt-4.1-nano
+    label: gpt-4.1-nano 0.4$ (1M)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: gpt-4.1-mini
+    label: gpt-4.1-mini 1.6$ (1M)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: gpt-4.1
+    label: gpt-4.1 8$ (1M)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: gpt-4o
+    label: gpt-4o 10$ (128K)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: gpt-4o-mini
+    label: gpt-4o-mini 0.6$ (128K)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: o4-mini
+    label: o4-mini 4.4$ (200K)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: o3
+    label: o3 40$ (200K)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: o3-mini
+    label: o3-mini 4.4$ (8K)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: o1
+    label: o1 60$ (16K)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+  - id: o1-mini
+    label: o1-mini 4.4$ (8K)
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_KEY}
+
+  # Ollama ve diğer local modelleri de ekleyebilirsin:
+  - id: qwen3:14b
+    label: qwen3 14b (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: null
+  - id: qwen3:8b
+    label: qwen3 8b (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: null
+  - id: devstral:24b-small-2505-q8_0
+    label: mistral devstral:24b-small-2505-q8_0 (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: null
+  - id: devstral:24b
+    label: mistral devstral:24b Q4_K_M (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: null
+  - id: myaniu/qwen2.5-1m:14b-instruct-q6_K_M
+    label: myaniu/qwen2.5-1m:14b-instruct-q6_K_M (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: null
+
+# === TOOLS ===
+tools:
+  - id: investigate
+    type: stdio
+    command: npx
+    args: ["-y", "@playwright/mcp@latest"]
+  - id: simulator
+    type: stdio
+    command: python
+    args: ["pw_simulator/main.py"]

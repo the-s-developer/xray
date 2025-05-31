@@ -1,40 +1,38 @@
+# xray-api.py
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os, asyncio, logging, traceback, uuid, json
 from contextlib import asynccontextmanager
+import os, asyncio, logging, traceback, uuid, json
 
 from dotenv import load_dotenv
 load_dotenv()
 
+from xray_config import load_xray_config, get_model_config, build_tool_from_config
 from openai_agent import OpenAIAgent
 from context_memory import ContextMemoryManager
 from tool_router import ToolRouter
-from tool_stdio_client import ToolStdioClient
 from tool_websocket_client import ToolWebSocketClient
+
 from project.init import setup_all
+from xray_config import load_xray_config, get_db_config
+from project.db import get_db
 
 logger = logging.getLogger("xray")
 logging.basicConfig(level=logging.INFO)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
 ws_clients = set()  # Aktif frontend websocket bağlantıları
-
 active_job: dict[str, asyncio.Task] = {}
 backend_status = {"state": "idle", "tps": 0.0, "job_id": None}
 
 def _update_status(state: str, tps: float = 0.0, job_id: str | None = None):
     backend_status.update({"state": state, "tps": round(tps, 2), "job_id": job_id})
 
-
 async def agent_status_notify(status):
-    print("------------>AGENT STATUS UPDATE:", status)
     await broadcast_ws_event({"event": "agent_status", "data": status})
 
-
 async def broadcast_ws_event(event_data):
-    """Bütün WS istemcilerine gönder; kapananları at."""
     closed = set()
     for ws in ws_clients:
         try:
@@ -42,32 +40,27 @@ async def broadcast_ws_event(event_data):
         except Exception:
             closed.add(ws)
     ws_clients.difference_update(closed)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tool_clients = []
+    config = load_xray_config()
+    mongo_uri, db_name = get_db_config(config)
+    app.state.db = get_db(mongo_uri, db_name)     
+    models = config.get("models", [])
+    tools = config.get("tools", [])
+    tool_clients = [build_tool_from_config(t) for t in tools]
+    app.state.xray_models = models
+    app.state.xray_tools = tools
     setup_all(app, tool_clients=tool_clients)
-
-    MCP_REMOTE_CLIENTS = [
-        ToolStdioClient(server_id="investigate", command="npx", args=["-y", "@playwright/mcp@latest"]),
-        ToolStdioClient(server_id="simulator",  command="python", args=["pw_simulator/main.py"]),
-    ]
     app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
-    app.state.router = ToolRouter([*MCP_REMOTE_CLIENTS, *tool_clients, app.state.ui_tool_client])
+    app.state.router = ToolRouter([*tool_clients, app.state.ui_tool_client])
     await app.state.router.__aenter__()
-
     app.state.memory = ContextMemoryManager(system="You are a helpful assistant.")
     app.state.memory.add_observer(lambda snap: asyncio.create_task(
         broadcast_ws_event({"event": "memory_update", "data": snap})
     ))
-
-    app.state.agent = OpenAIAgent(api_key=OPENAI_API_KEY, on_status_update=agent_status_notify)
-    await app.state.agent.__aenter__()
-
     yield
-
-    await app.state.agent.__aexit__(None, None, None)
     await app.state.router.__aexit__(None, None, None)
-
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
@@ -133,18 +126,18 @@ from uuid import uuid4
 
 @app.get("/api/models")
 async def list_models():
-    try:
-        models = await app.state.agent.client.models.list()
-        model_list = []
-        for model in models.data:
-            if is_chat_model(model.id):
-                model_list.append({
-                    "value": model.id,
-                    "label": model.id.replace("-", " ").upper()
-                })
-        return {"models": model_list}
-    except Exception as e:
-        return {"models": [], "error": str(e)}
+    # Direkt konfigden oku, OpenAI ile canlı sorgulama yok!
+    models = getattr(app.state, "xray_models", [])
+    model_list = []
+    for m in models:
+        model_id = m.get("id") or m.get("model_id") or m.get("name")
+        model_name = model_id or str(m)
+        label = m.get("label") or model_name.replace("-", " ").upper()
+        model_list.append({
+            "value": model_name,
+            "label": label,
+        })
+    return {"models": model_list}
 
 def is_chat_model(model_id):
     ok = (
@@ -214,21 +207,30 @@ async def replay_chat(request: Request):
     data = await request.json()
     model = data.get("model")
     memory = app.state.memory
+    router = app.state.router
+    models = getattr(app.state, "xray_models", [])
+    model_cfg = get_model_config(model, models)
     base_msgs = [m.copy() for m in memory.get_all_messages() if m["role"] in ("system", "user")]
     memory.clear()
     for msg in base_msgs:
         if msg["role"] == "system":
             memory.add_message(msg)
         elif msg["role"] == "user":
-            await app.state.agent.ask(
-                tool_client=app.state.router,
-                prompt=msg["content"],
+            async with OpenAIAgent(
+                api_key=model_cfg["api_key"],
+                base_url=model_cfg["base_url"],
+                model_id=model,
+                tool_client=router,
                 memory_manager=memory,
-                model=model,            # <-- model burada eklenmeli
-                stream=False
-            )
+                on_status_update=agent_status_notify,
+            ) as agent:
+                await agent.ask(
+                    msg["content"],
+                    stream=False
+                )
     memory._notify_observers()
     return {"status": "ok"}
+
 
 
 @app.post("/api/chat/replay_until/{until_id}")
@@ -236,6 +238,9 @@ async def replay_until_message(until_id: str, request: Request):
     memory = app.state.memory
     data = await request.json()
     model = data.get("model")
+    router = app.state.router
+    models = getattr(app.state, "xray_models", [])
+    model_cfg = get_model_config(model, models)
     original_msgs = [m.copy() for m in memory.get_all_messages()]
     idx = next((i for i, m in enumerate(original_msgs) if m["id"] == until_id and m["role"] == "user"), None)
     if idx is None:
@@ -249,12 +254,18 @@ async def replay_until_message(until_id: str, request: Request):
     memory.add_message(before[0])
     for m in before[1:]:
         memory.add_message(m)
-    await app.state.agent.ask(
-        tool_client=app.state.router,
-        prompt=original_msgs[idx]["content"],
+    async with OpenAIAgent(
+        api_key=model_cfg["api_key"],
+        base_url=model_cfg["base_url"],
+        model_id=model,
+        tool_client=router,
         memory_manager=memory,
-        model=model,
-    )
+        on_status_update=agent_status_notify,
+    ) as agent:
+        await agent.ask(
+            original_msgs[idx]["content"],
+            stream=False
+        )
     j = idx + 1
     while j < len(original_msgs) and original_msgs[j]["role"] in ("assistant", "tool"):
         j += 1
@@ -262,6 +273,7 @@ async def replay_until_message(until_id: str, request: Request):
         memory.add_message(m)
     memory._notify_observers()
     return {"status": "ok"}
+
 
 @app.post("/api/chat/bulk_delete")
 async def bulk_delete(request: Request):
@@ -335,45 +347,59 @@ async def run_tool(request: Request):
     except Exception as exc:
         return {"error": str(exc)}
 
+
 @app.post("/api/chat/ask")
 async def ask(request: Request):
     data = await request.json()
-    reply = await app.state.agent.ask(app.state.router,
-                                      data["message"],
-                                      app.state.memory,
-                                      data.get("model"),
-                                      stream=False)
+    model_id = data.get("model")
+    models = getattr(app.state, "xray_models", [])
+    model_cfg = get_model_config(model_id, models)
+    async with OpenAIAgent(
+        api_key=model_cfg["api_key"],
+        base_url=model_cfg["base_url"],
+        model_id=model_id,
+        tool_client=app.state.router,
+        memory_manager=app.state.memory,
+        on_status_update=agent_status_notify,
+    ) as agent:
+        reply = await agent.ask(
+            data["message"],
+            stream=False
+        )
     return {"reply": reply}
 
-# ----------------- *** STREAMING ENDPOINT *** -----------------
 @app.post("/api/chat/ask_stream")
 async def ask_stream(request: Request):
     data = await request.json()
     prompt = data["message"]
-    model  = data.get("model")
+    model_id = data.get("model")
     job_id = str(uuid.uuid4())
     _update_status("running", job_id=job_id)
+    models = getattr(app.state, "xray_models", [])
+    model_cfg = get_model_config(model_id, models)
 
     async def gen():
         task = asyncio.current_task()
         active_job[job_id] = task
 
         try:
-            # -------- FIX: önce coroutine'i await et, sonra async-generator'u iterate et ----------
-            agent_stream = await app.state.agent.ask(app.state.router,
-                                                     prompt,
-                                                     app.state.memory,
-                                                     model,
-                                                     stream=True)
-            async for sse in agent_stream:
-                try:
-                    payload = json.loads(sse.removeprefix("data: ").strip())
-                    if payload.get("type") == "end":
-                        _update_status("idle", payload.get("tps", 0), None)
-                except Exception:
-                    pass
-                yield sse if sse.startswith("data:") else f"data: {sse}\n\n"
-            # --------------------------------------------------------------------------------------
+            async with OpenAIAgent(
+                api_key=model_cfg["api_key"],
+                base_url=model_cfg["base_url"],
+                model_id=model_id,
+                tool_client=app.state.router,
+                memory_manager=app.state.memory,
+                on_status_update=agent_status_notify,
+            ) as agent:
+                agent_stream = await agent.ask(prompt, stream=True)
+                async for sse in agent_stream:
+                    try:
+                        payload = json.loads(sse.removeprefix("data: ").strip())
+                        if payload.get("type") == "end":
+                            _update_status("idle", payload.get("tps", 0), None)
+                    except Exception:
+                        pass
+                    yield sse if sse.startswith("data:") else f"data: {sse}\n\n"
         except asyncio.CancelledError:
             yield "data: " + json.dumps({"type": "stopped"}) + "\n\n"
         finally:

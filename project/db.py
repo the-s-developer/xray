@@ -1,8 +1,9 @@
+# project/db.py
 import motor.motor_asyncio
 
-def get_db():
-    client = motor.motor_asyncio.AsyncIOMotorClient("mongodb://mongo:mongo@192.168.99.97:27017")
-    return client["xray"]
-
-def setup_db(app):
-    app.state.db = get_db()
+def get_db(mongo_uri, db_name):
+    """
+    Parametre ile gelen URI ve db_name ile Motor async db client döndürür.
+    """
+    client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
+    return client[db_name]

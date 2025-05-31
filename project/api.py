@@ -1,273 +1,180 @@
 # project/api.py
-from fastapi import APIRouter, Request, HTTPException, Body
-from typing import List
-from datetime import datetime
-from project.models import Project, ScriptVersion, Execution
-from project.utils import nanoid, drop_mongo_id
-import json
-from project.utils import nanoid, strip_mongo_ids
+from fastapi import APIRouter, Request, HTTPException, Body, Query
+from typing import List, Dict, Any
+from project.service import (
+    create_project, list_projects, get_project, update_project, delete_project,
+    save_script, list_scripts, find_script, update_script, delete_script,
+    save_execution, list_executions, update_prompts, get_prompts,
+    set_current_project, get_current_project_by_state,run_script_for_project
+
+)
+
+from project.utils import drop_mongo_id, drop_mongo_ids
 
 router = APIRouter()
 
-def now_iso():
-    return datetime.utcnow().isoformat()
-
 # -- PROJECT ENDPOINTS --
 
-@router.post("/api/projects", response_model=Project)
-async def create_project(request: Request):
+@router.post("/api/project", response_model=dict)
+async def create_project_ep(request: Request):
     db = request.app.state.db
     body = await request.json()
-    project_id = nanoid()
-    project = Project(
-        projectId=project_id,
-        projectName=body.get("projectName", ""),
-        projectDescription=body.get("projectDescription", ""),
-        projectStatus=body.get("projectStatus", "active"),
-        scraperDomain=body.get("scraperDomain", ""),
-        createdAt=now_iso(),
-        updatedAt=now_iso(),
-        prompts=body.get("prompts", []),
-        executionConfig=body.get("executionConfig", {}),
-    )
-    await db.projects.insert_one(project.dict())
-    return project
+    proj = await create_project(db, body)
+    return drop_mongo_id(proj)
 
-@router.get("/api/projects", response_model=List[Project])
-async def list_projects(request: Request):
+@router.get("/api/project", response_model=List[dict])
+async def list_projects_ep(request: Request):
     db = request.app.state.db
-    docs = await db.projects.find({}).to_list(length=100)
-    return [drop_mongo_id(doc) for doc in docs]
+    return await list_projects(db)
 
-@router.get("/api/projects/{project_id}", response_model=Project)
-async def get_project(project_id: str, request: Request):
+@router.get("/api/project/{project_id}", response_model=dict)
+async def get_project_ep(project_id: str, request: Request):
     db = request.app.state.db
-    doc = await db.projects.find_one({"projectId": project_id})
-    if not doc:
+    proj = await get_project(db, project_id)
+    if not proj:
         raise HTTPException(404, "Project not found")
-    return drop_mongo_id(doc)
+    return drop_mongo_id(proj)
+
+@router.put("/api/project/{project_id}", response_model=dict)
+async def update_project_ep(project_id: str, request: Request):
+    db = request.app.state.db
+    body = await request.json()
+    proj = await update_project(db, project_id, body)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    return drop_mongo_id(proj)
+
+@router.delete("/api/project/{project_id}", response_model=dict)
+async def delete_project_ep(project_id: str, request: Request):
+    db = request.app.state.db
+    ok = await delete_project(db, project_id)
+    if not ok:
+        raise HTTPException(404, "Project not found")
+    return {"ok": True}
 
 # -- SCRIPT ENDPOINTS --
 
-@router.post("/api/scripts", response_model=ScriptVersion)
-async def add_script(request: Request):
+@router.post("/api/project/{project_id}/script", response_model=dict)
+async def add_script_ep(project_id: str, request: Request):
     db = request.app.state.db
     body = await request.json()
-
-    # En son versiyonu bul (descending sort)
-    latest = await db.scripts.find({"projectId": body["projectId"]}).sort("version", -1).to_list(1)
-    version = (latest[0]["version"] if latest else 0) + 1
-
-    script_id = nanoid(14)
-    script = ScriptVersion(
-        scriptId=script_id,
-        projectId=body["projectId"],
-        version=version,  # Oto-arttırılan versiyon!
+    script = await save_script(
+        db,
+        project_id=project_id,
         code=body["code"],
-        createdAt=now_iso(),
-        createdBy=body.get("createdBy", "unknown"),
-        generatedByLLM=body.get("generatedByLLM", False),
+        created_by=body.get("createdBy", "unknown"),
+        generated_by_llm=body.get("generatedByLLM", False),
         notes=body.get("notes", "")
     )
-    await db.scripts.insert_one(script.dict())
-    return script
+    return drop_mongo_id(script)
 
-
-@router.get("/api/projects/{project_id}/scripts", response_model=List[ScriptVersion])
-async def get_project_scripts(project_id: str, request: Request):
+@router.get("/api/project/{project_id}/script", response_model=List[dict])
+async def get_project_scripts_ep(project_id: str, request: Request):
     db = request.app.state.db
-    scripts = await db.scripts.find({"projectId": project_id}).sort("version", -1).to_list(100)
+    scripts = await list_scripts(db, project_id)
     return [drop_mongo_id(s) for s in scripts]
 
-# -- SCRIPT SİLME ENDPOINTİ --
-@router.delete("/api/scripts/{script_id}")
-async def delete_script(script_id: str, request: Request):
+@router.get("/api/project/{project_id}/script/{script_version}", response_model=dict)
+async def get_script_by_version_ep(project_id: str, script_version: int, request: Request):
     db = request.app.state.db
-    result = await db.scripts.delete_one({"scriptId": script_id})
-    if result.deleted_count == 0:
-        raise HTTPException(404, "Script not found")
-    return {"ok": True}
-# project/api.py
+    script = await find_script(db, project_id, script_version)
+    if not script:
+        raise HTTPException(404, "Script version not found")
+    return drop_mongo_id(script)
 
-@router.put("/api/scripts/{script_id}", response_model=ScriptVersion)
-async def update_script(script_id: str, request: Request):
+@router.put("/api/project/{project_id}/script/{script_id}", response_model=dict)
+async def update_script_ep(project_id: str, script_id: str, request: Request):
     db = request.app.state.db
     body = await request.json()
-    updated = await db.scripts.find_one_and_update(
-        {"scriptId": script_id},
-        {"$set": {
-            "code": body.get("code"),
-            "notes": body.get("notes", ""),
-            "updatedAt": now_iso(),
-        }},
-        return_document=True
-    )
-    if not updated:
+    script = await update_script(db, script_id, code=body.get("code"), notes=body.get("notes"))
+    if not script:
         raise HTTPException(404, "Script not found")
-    return drop_mongo_id(updated)
+    return drop_mongo_id(script)
+
+@router.delete("/api/project/{project_id}/script/{script_id}", response_model=dict)
+async def delete_script_ep(project_id: str, script_id: str, request: Request):
+    db = request.app.state.db
+    ok = await delete_script(db, script_id)
+    if not ok:
+        raise HTTPException(404, "Script not found")
+    return {"ok": True}
 
 # -- EXECUTION ENDPOINTS --
 
-@router.post("/api/executions", response_model=Execution)
-async def add_execution(request: Request):
+@router.post("/api/project/{project_id}/execution", response_model=dict)
+async def add_execution_ep(project_id: str, request: Request):
     db = request.app.state.db
     body = await request.json()
-    execution_id = nanoid(14)
-
-    # result alanı dict olmalı, string ise boş dict'e çevir
-    result = body.get("result", {})
-    if not isinstance(result, dict):
-        result = {}
-
-    execution = Execution(
-        executionId=execution_id,
-        projectId=body["projectId"],
-        scriptId=body["scriptId"],
-        scriptVersion=int(body["scriptVersion"]),
-        status=body.get("status", "pending"),
-        startTime=now_iso(),
-        endTime=body.get("endTime"),
-        duration=body.get("duration", 0),
-        resultCount=body.get("resultCount", 0),
-        output=body.get("output", ""),
-        errorMessage=body.get("errorMessage", ""),
-        result=result
-    )
-    try:
-        await db.executions.insert_one(execution.dict())
-    except Exception as e:
-        print("[ERROR] Execution insert failed:", e)
-        raise HTTPException(500, "Failed to insert execution")
-    return execution
+    execution = await save_execution(db, project_id, body)
+    return drop_mongo_id(execution)
 
 
-@router.get("/api/projects/{project_id}/executions", response_model=List[Execution])
-async def get_project_executions(project_id: str, request: Request):
-    db = request.app.state.db
-    executions = await db.executions.find({"projectId": project_id}).sort("startTime", -1).to_list()
-    return [drop_mongo_id(e) for e in executions]
-
-# PROMPT SYNC
-@router.post("/api/projects/{project_id}/prompts", response_model=Project)
-async def set_project_prompts(project_id: str, request: Request, prompts: List[dict] = Body(...)):
-    db = request.app.state.db
-    updated = await db.projects.find_one_and_update(
-        {"projectId": project_id},
-        {"$set": {
-            "prompts": prompts,
-            "updatedAt": now_iso()
-        }},
-        return_document=True
-    )
-    if not updated:
-        raise HTTPException(404, "Project not found")
-    return drop_mongo_id(updated)
-
-@router.get("/api/projects/{project_id}/prompts")
-async def get_project_prompts(project_id: str, request: Request):
-    db = request.app.state.db
-    doc = await db.projects.find_one({"projectId": project_id}, {"_id": 0, "prompts": 1})
-    if not doc:
-        raise HTTPException(404, "Project not found")
-    return doc.get("prompts", [])
-
-# -- SCRIPT ÇALIŞTIR (RUN-LATEST) --
-from pw_simulator.pw_runner.runner import execute_python_code
-
-@router.post("/api/projects/{project_id}/run")
-async def run_script(
+@router.get("/api/project/{project_id}/execution", response_model=Dict[str, Any])
+async def get_project_executions_ep(
     project_id: str,
     request: Request,
-    max_count: int = 3
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    script_id: str = Query(None),
+    status: str = Query(None)
 ):
-    print(f"project run: {project_id}, max_count: {max_count}")
     db = request.app.state.db
-    body = await request.json()
-    script_id = body.get("scriptId")
-
-    if script_id:
-        script = await db.scripts.find_one({"projectId": project_id, "scriptId": script_id})
-        if not script:
-            raise HTTPException(404, "Script not found")
-    else:
-        # fallback: latest
-        script = await db.scripts.find({"projectId": project_id}).sort("version", -1).to_list(1)
-        if not script:
-            raise HTTPException(404, "No script found for project")
-        script = script[0]
-
-    # Kod çalıştırma aynı
-    result = await execute_python_code(
-        script["code"],
-        no_prints=False,
-        max_count=max_count
+    executions, total = await list_executions(
+        db, project_id, page=page, page_size=page_size,
+        script_id=script_id, status=status
     )
-    output_json = result.get("result")
-    logs = result.get("logs", "")
-    error = ""
-    if output_json and isinstance(output_json, dict):
-        error = output_json.get("error", "")
-    if not error and "traceback" in logs.lower():
-        error = logs
+    return {"executions": drop_mongo_ids(executions), "total": total}
 
-    execution_id = nanoid(14)
-    now = now_iso()
-    # Burada result alanı için dict kontrolü yapıldı!
-    execution = {
-        "executionId": execution_id,
-        "projectId": project_id,
-        "scriptId": script["scriptId"],
-        "scriptVersion": script["version"],
-        "status": "error" if error else "success",
-        "startTime": now,
-        "endTime": now,
-        "duration": 1,
-        "resultCount": len(output_json.get("data", [])) if output_json and isinstance(output_json, dict) and "data" in output_json else 0,
-        "output": json.dumps(output_json) if output_json else "",
-        "logs": logs,
-        "errorMessage": error or "",
-        "result": output_json if isinstance(output_json, dict) else {},
-    }
-    try:
-        insert_result = await db.executions.insert_one(execution)
-        print("[DEBUG] Inserted executionId:", insert_result.inserted_id)
-    except Exception as e:
-        print("[ERROR] Execution insert failed:", e)
 
-    project = await db.projects.find_one({"projectId": project_id})
-    return strip_mongo_ids({
-        "project": project,
-        "script": script,
-        "execution": execution,
-        "raw_result": result,
-    })
 
-@router.post("/api/project/current")
-async def set_current_project(request: Request):
-    """
-    Seçili projeyi global context'e kaydeder.
-    Body: { "projectId": "PRJ123..." }
-    """
+# -- PROMPT ENDPOINTS --
+
+@router.post("/api/project/{project_id}/prompts", response_model=dict)
+async def set_project_prompts_ep(project_id: str, request: Request, prompts: List[dict] = Body(...)):
+    db = request.app.state.db
+    proj = await update_prompts(db, project_id, prompts)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    return drop_mongo_id(proj)
+
+@router.get("/api/project/{project_id}/prompts", response_model=List[dict])
+async def get_project_prompts_ep(project_id: str, request: Request):
+    db = request.app.state.db
+    prompts = await get_prompts(db, project_id)
+    return prompts
+
+# -- CURRENT PROJECT CONTEXT ENDPOINTS --
+
+@router.post("/api/project/current", response_model=dict)
+async def set_current_project_ep(request: Request):
     db = request.app.state.db
     body = await request.json()
     project_id = body.get("projectId")
-    if not project_id:
-        raise HTTPException(400, "projectId is required")
-
-    project = await db.projects.find_one({"projectId": project_id})
-    if not project:
+    result = await set_current_project(request, db, project_id)
+    if not result:
         raise HTTPException(404, "Project not found")
+    return result
 
-    # Context'e kaydet (thread-safe)
-    request.app.state.current_project = project
-    return {"ok": True, "current_project": drop_mongo_id(project)}
-
-@router.get("/api/project/current")
-async def get_current_project(request: Request):
-    """
-    O anda seçili olan projeyi döndürür.
-    """
-    project = getattr(request.app.state, "current_project", None)
-    if not project:
+@router.get("/api/project/current", response_model=dict)
+async def get_current_project_ep(request: Request):
+    proj = get_current_project_by_state(request)
+    if not proj:
         raise HTTPException(404, "No current project set")
-    return drop_mongo_id(project)
+    return drop_mongo_id(proj)
+
+
+@router.post("/api/project/{project_id}/run", response_model=dict)
+async def run_script_ep(project_id: str, request: Request):
+    db = request.app.state.db
+    body = await request.json()
+    script_id = body.get("scriptId")
+    max_count = body.get("maxCount", 3)
+    try:
+        execution = await run_script_for_project(
+            db, project_id,
+            max_count=max_count,
+            script_id=script_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True, "execution": execution}
