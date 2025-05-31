@@ -6,6 +6,9 @@ from openai import AsyncOpenAI
 from tool_client import ToolClient
 from context_memory import ContextMemoryManager
 
+#OPENAI_BASE_URL = "http://192.168.99.95:11434/v1" #None
+OPENAI_BASE_URL = None#"http://localhost:11434/v1" #None
+
 class OpenAIAgent:
     """OpenAI API wrapper with session-aware tool routing."""
 
@@ -17,7 +20,10 @@ class OpenAIAgent:
         self.client: Optional[AsyncOpenAI] = None
 
     async def __aenter__(self) -> "OpenAIAgent":
-        self.client = AsyncOpenAI(api_key=self.api_key)
+        self.client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=OPENAI_BASE_URL
+            )   
         return self
 
     async def __aexit__(self, *args):
@@ -30,7 +36,7 @@ class OpenAIAgent:
         tool_client: ToolClient,
         prompt: str,
         memory_manager: ContextMemoryManager,
-        model: str = "gpt-4.1-nano",
+        model: str,
     ) -> str:
         """
         OpenAI ile, tool ve hafıza kullanarak tek seferde chat cevabı alır.
@@ -43,7 +49,11 @@ class OpenAIAgent:
         tool_defs = await tool_client.list_tools()
 
         while True:
+            memory_manager.retain_last_tool_call_pairs(3)
             messages = memory_manager.get_all_messages()
+            if not messages:
+                raise ValueError("OpenAI API çağrısı için boş 'messages' dizisi gönderilemez.")
+
             response = await self.client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -82,34 +92,34 @@ class OpenAIAgent:
                 self._save_context(memory_manager)
                 return full_response
 
-            # Sadece ilk tool çağrısını işle (chain-of-thought için döngü)
-            first_call_id = next(iter(partial_calls))
-            first_call = partial_calls[first_call_id]
-            memory_manager.add_tool_calls({first_call_id: first_call})
-
-            try:
-                args = {}
-                if first_call["arguments"]:
-                    try:
-                        args = json.loads(first_call["arguments"])
-                    except Exception as e:
-                        print(f"⚠️ JSON decode error: {e} (input: {first_call['arguments']!r})")
-                        args = {}
-                result = await tool_client.call_tool(first_call_id, first_call["name"], args)
-                # *** Burada tip kontrolü ***
-                if not isinstance(result, str):
-                    result = json.dumps(result, ensure_ascii=False)
-                memory_manager.add_tool_result(first_call_id, result)
-            except Exception as ex:
-                print(f"⚠️ Tool execution failed: {ex}")
-                error_json = json.dumps({
-                    "error": "TOOL EXECUTION FAILED",
-                    "detail": str(ex)
-                })
-                memory_manager.add_tool_result(first_call["id"], error_json)
+            # Tüm tool çağrılarını sırayla işle!
+            tool_call_results = {}
+            for call_id, call in partial_calls.items():
+                memory_manager.add_tool_calls({call_id: call})
+                try:
+                    args = {}
+                    if call["arguments"]:
+                        try:
+                            args = json.loads(call["arguments"])
+                        except Exception as e:
+                            print(f"⚠️ JSON decode error: {e} (input: {call['arguments']!r})")
+                            args = {}
+                    result = await tool_client.call_tool(call_id, call["name"], args)
+                    if not isinstance(result, str):
+                        result = json.dumps(result, ensure_ascii=False)
+                    memory_manager.add_tool_result(call_id, result)
+                    tool_call_results[call_id] = result
+                except Exception as ex:
+                    print(f"⚠️ Tool execution failed: {ex}")
+                    error_json = json.dumps({
+                        "error": "TOOL EXECUTION FAILED",
+                        "detail": str(ex)
+                    })
+                    memory_manager.add_tool_result(call["id"], error_json)
+                    tool_call_results[call_id] = error_json
 
             self._save_context(memory_manager)
-
+            
     def _save_context(self, memory_manager: ContextMemoryManager):
         """İsteğe bağlı: context'i diske yaz."""
         try:

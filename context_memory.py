@@ -17,14 +17,8 @@ def ensure_id(msg):
 class ContextMemoryManager:
     def __init__(
         self,
-        max_context_tokens: int = 1000000,
         system: Optional[str] = None,
-        max_big_content: Optional[int] = 2,
-        big_content_threshold: int = 2000
     ):
-        self.max_context_tokens = max_context_tokens
-        self.max_big_content = max_big_content
-        self.big_content_threshold = big_content_threshold
         self._messages: List[Dict[str, Any]] = []
         self._observers: List[Callable] = []
         if system is not None:
@@ -33,7 +27,6 @@ class ContextMemoryManager:
 
     
     def add_observer(self, callback: Callable) -> None:
-        print("add observer")
         self._observers.append(callback)
 
     def remove_observer(self, callback: Callable) -> None:
@@ -110,7 +103,6 @@ class ContextMemoryManager:
     def set_messages(self, messages):
         # Her mesajı kendi id’siyle değil, YENİ id ile memory’ye ekle!
         self._messages = [ensure_id(m.copy()) for m in messages]
-        print("-----------------set messages",self._messages)
         self._notify_observers()
 
 
@@ -140,3 +132,47 @@ class ContextMemoryManager:
                 lines.append(f"\n\n{role}:\n\n {content}")
             lines.append("="*50)        
         return "\n".join(lines)
+    def retain_last_tool_call_pairs(self, n: int):
+        """
+        Sadece tool çağrısı içeren assistant ve tool mesajlarını son n çift olacak şekilde tutar.
+        Diğer user, system ve tool_calls olmayan assistant mesajları KORUNUR.
+        """
+        # 1. Diğer mesajlar sabit dursun
+        preserved = [msg for msg in self._messages if (
+            msg.get("role") in ("system", "user") or (
+                msg.get("role") == "assistant" and "tool_calls" not in msg
+            )
+        )]
+
+        # 2. Tool çağrısı içeren assistant ve tool mesajlarını al
+        assistant_toolcalls = []
+        tool_results = []
+        for msg in self._messages:
+            if msg.get("role") == "assistant" and "tool_calls" in msg:
+                assistant_toolcalls.append(msg)
+            elif msg.get("role") == "tool":
+                tool_results.append(msg)
+
+        # 3. Son n tool çağrısı bul ve id’lerini çıkar
+        last_n_assistants = assistant_toolcalls[-n:]
+        tool_call_ids_to_keep = []
+        for msg in last_n_assistants:
+            for call in msg["tool_calls"]:
+                tool_call_ids_to_keep.append(call["id"])
+
+        # 4. Sadece bu tool_call_id’lere ait tool sonuçlarını tut
+        last_n_tool_results = [msg for msg in tool_results if msg.get("tool_call_id") in tool_call_ids_to_keep]
+
+        # 5. Tümünü kronolojik sıraya göre birleştir
+        filtered = []
+        for msg in self._messages:
+            if msg in preserved:
+                filtered.append(msg)
+            elif msg in last_n_assistants:
+                filtered.append(msg)
+            elif msg in last_n_tool_results:
+                filtered.append(msg)
+
+        self._messages = filtered
+        self._notify_observers()
+

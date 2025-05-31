@@ -28,7 +28,7 @@ Workflow:
 6. Success & Delivery:
    * Once data is successfully extracted:
      * Present the final working Python scraper code and the output data sample.
-     * Save the final code as **"generated\_script.py"** using filemanager__save\_file(tool).
+     * Save the final code as **"simulator\_script.py"** using filemanager__save\_file(tool).
 ---
 Goal:
 Automatically and adaptively develop a working web scraper for any target page using Playwright (for browsing/analysis) and BeautifulSoup (for parsing), always using `RESULT` and `MAX_COUNT` as required above.
@@ -75,4 +75,3 @@ with sync_playwright() as p:
     RESULT.extend(news)
     browser.close()
     print(RESULT)
-

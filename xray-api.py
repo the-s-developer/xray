@@ -8,7 +8,10 @@ from tool_router import ToolRouter
 from tool_stdio_client import ToolStdioClient
 from tool_websocket_client import ToolWebSocketClient
 
-from project.api import router as project_router
+
+from dotenv import load_dotenv
+load_dotenv()  # .env dosyasını yükle
+
 from project.init import setup_all
 
 
@@ -35,7 +38,7 @@ async def lifespan(app: FastAPI):
     setup_all(app, tool_clients=tool_clients)
 
     MCP_REMOTE_CLIENTS = [
-        ToolStdioClient(server_id="investigator", command="npx", args=["-y", "@playwright/mcp@latest"]),
+        ToolStdioClient(server_id="playwright", command="npx", args=["-y", "@playwright/mcp@latest"]),
         ToolStdioClient(server_id="simulator", command="python", args=["pw_simulator/main.py"]),
     ]
     # Tek bir WebSocketClient, memory ve tool events için
@@ -46,11 +49,7 @@ async def lifespan(app: FastAPI):
         app.state.ui_tool_client
     ])
     await app.state.router.__aenter__()
-    app.state.memory = ContextMemoryManager(
-        system="You are a helpful assistant.",
-        max_big_content=2,
-        big_content_threshold=2000
-    )
+    app.state.memory = ContextMemoryManager(system="You are a helpful assistant.")
     app.state.memory.add_observer(memory_observer_callback)
     app.state.agent = OpenAIAgent(api_key=OPENAI_API_KEY)
     await app.state.agent.__aenter__()
@@ -224,7 +223,8 @@ async def delete_message(msg_id: str):
 async def ask(request: Request):
     data = await request.json()
     user_message = data["message"]
-    model = data.get("model", "gpt-4.1-nano")
+    model = data.get("model")
+    print(f"---------------------------------User message: {user_message!r}, model: {model!r}")
     reply = await app.state.agent.ask(
         tool_client=app.state.router,
         prompt=user_message,
@@ -314,11 +314,7 @@ async def bulk_delete(request: Request):
 @app.post("/api/chat/reset")
 async def reset_state():
     old_observers = list(getattr(app.state.memory, "_observers", []))
-    app.state.memory = ContextMemoryManager(
-        system="You are a helpful assistant.",
-        max_big_content=2,
-        big_content_threshold=2000
-    )
+    app.state.memory = ContextMemoryManager(system="You are a helpful assistant.")
     for cb in old_observers:
         app.state.memory.add_observer(cb)
     app.state.memory._notify_observers()
