@@ -1,35 +1,163 @@
+# openai_agent.py
 from __future__ import annotations
 import json
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, Optional, Callable, AsyncGenerator, Union
 
 from openai import AsyncOpenAI
 from tool_client import ToolClient
 from context_memory import ContextMemoryManager
+from status_enum import AgentStatus
 
-#OPENAI_BASE_URL = "http://192.168.99.95:11434/v1" #None
-OPENAI_BASE_URL = None#"http://localhost:11434/v1" #None
+OPENAI_BASE_URL = None
 
 class OpenAIAgent:
-    """OpenAI API wrapper with session-aware tool routing."""
-
-    def __init__(
-        self,
-        api_key: str,
-    ) -> None:
+    def __init__(self, api_key: str, on_status_update: Optional[Callable[[dict], None]] = None):
         self.api_key = api_key
         self.client: Optional[AsyncOpenAI] = None
+        self.on_status_update = on_status_update
 
     async def __aenter__(self) -> "OpenAIAgent":
-        self.client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=OPENAI_BASE_URL
-            )   
+        self.client = AsyncOpenAI(api_key=self.api_key, base_url=OPENAI_BASE_URL)
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, *_):
         if self.client and hasattr(self.client, "aclose"):
             await self.client.aclose()
         self.client = None
+
+    async def _notify_status(self, status: dict):
+        if self.on_status_update:
+            maybe_coro = self.on_status_update(status)
+            if hasattr(maybe_coro, "__await__"):
+                await maybe_coro
+
+    def _save_context(self, memory_manager: ContextMemoryManager):
+        try:
+            with open("context_refined.json", "w", encoding="utf-8") as f:
+                json.dump(
+                    memory_manager.get_all_messages(),
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        except Exception as e:
+            print(f"⚠️ Failed to save context: {e}")
+
+    def _parse_tool_arguments(self, call):
+        arguments = call.get("arguments", "")
+        if not arguments:
+            return {}
+        if isinstance(arguments, dict):
+            return arguments
+        try:
+            return json.loads(arguments)
+        except Exception as e:
+            print("[WARN] Tool-call argümantasyon hatası:", e, "| Raw arguments:", repr(arguments))
+            return {}
+
+    async def ask_stream(
+        self,
+        tool_client: ToolClient,
+        prompt: str,
+        memory_manager: ContextMemoryManager,
+        model: str,
+    ) -> AsyncGenerator[str, None]:
+        if self.client is None:
+            raise RuntimeError("Agent not initialized – use `async with`")
+        memory_manager.add_user_prompt(prompt)
+        tool_defs = await tool_client.list_tools()
+        memory_manager.retain_last_tool_call_pairs(3)
+        messages = memory_manager.get_all_messages()
+
+        buffer = ""
+        ongoing: Dict[int, Dict[str, Any]] = {}
+        token_count = 0
+        start_time = time.perf_counter()
+
+        def current_tps():
+            elapsed = max(time.perf_counter() - start_time, 0.001)
+            return token_count / elapsed
+
+        try:
+            await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
+            stream_resp = await self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tool_defs,
+                stream=True,
+            )
+
+            async for chunk in stream_resp:
+                delta = chunk.choices[0].delta
+                # partial_assistant
+                if getattr(delta, "content", None):
+                    buffer += delta.content
+                    token_count += len(delta.content.split())
+                    yield json.dumps({
+                        "type": "partial_assistant",
+                        "content": buffer,
+                        "tps": current_tps()
+                    })
+
+                # tool_call
+                if delta.tool_calls:
+                    await self._notify_status({"state": AgentStatus.TOOL_CALLING.value, "phase": "tools"})
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        entry = ongoing.setdefault(
+                            idx,
+                            {
+                                "id": tc.id,
+                                "type": tc.type,
+                                "name": getattr(tc.function, "name", None),
+                                "arguments": "",
+                            },
+                        )
+                        entry["id"] = entry["id"] or tc.id
+                        entry["type"] = entry["type"] or tc.type
+                        entry["name"] = entry["name"] or getattr(tc.function, "name", None)
+                        entry["arguments"] += getattr(tc.function, "arguments", "")
+                    yield json.dumps({
+                        "type": "tool_call",
+                        "calls": ongoing,
+                        "tps": current_tps()
+                    })
+
+            # Finalize: assistant cevabı + tool call sonuçları
+            if buffer.strip():
+                memory_manager.add_assistant_reply(buffer)
+
+            if ongoing:
+                for call in ongoing.values():
+                    if not (call["id"] and call["name"] and call["type"]):
+                        continue
+                    args = self._parse_tool_arguments(call)
+                    if not args:
+                        continue
+                    memory_manager.add_tool_calls({call["id"]: call})
+                    try:
+                        result = await tool_client.call_tool(call["id"], call["name"], args)
+                        if not isinstance(result, str):
+                            result = json.dumps(result, ensure_ascii=False)
+                    except Exception as ex:
+                        await self._notify_status({"state": AgentStatus.ERROR.value})
+                        result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
+                    memory_manager.add_tool_result(call["id"], result)
+                    yield json.dumps({
+                        "type": "tool_result",
+                        "call_id": call["id"],
+                        "result": result,
+                        "tps": current_tps()
+                    })
+
+            tps = current_tps()
+            await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
+            yield json.dumps({"type": "end", "tps": tps})
+
+        except Exception as err:
+            await self._notify_status({"state": AgentStatus.ERROR.value})
+            yield json.dumps({"type": "end", "error": str(err)})
 
     async def ask(
         self,
@@ -37,108 +165,80 @@ class OpenAIAgent:
         prompt: str,
         memory_manager: ContextMemoryManager,
         model: str,
+        stream: bool = False,
+    ) -> Union[str, AsyncGenerator[str, None]]:
+        if stream:
+            return self.ask_stream(tool_client, prompt, memory_manager, model)
+        else:
+            return await self.ask_non_stream(tool_client, prompt, memory_manager, model)
+
+    async def ask_non_stream(
+        self,
+        tool_client: ToolClient,
+        prompt: str,
+        memory_manager: ContextMemoryManager,
+        model: str,
     ) -> str:
-        """
-        OpenAI ile, tool ve hafıza kullanarak tek seferde chat cevabı alır.
-        Streaming yok!
-        """
         if self.client is None:
             raise RuntimeError("Agent not initialized – use `async with`")
-
         memory_manager.add_user_prompt(prompt)
         tool_defs = await tool_client.list_tools()
+        memory_manager.retain_last_tool_call_pairs(3)
+        messages = memory_manager.get_all_messages()
 
-        while True:
-            memory_manager.retain_last_tool_call_pairs(3)
-            messages = memory_manager.get_all_messages()
-            if not messages:
-                raise ValueError("OpenAI API çağrısı için boş 'messages' dizisi gönderilemez.")
-
-            response = await self.client.chat.completions.create(
+        try:
+            await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
+            resp = await self.client.chat.completions.create(
                 model=model,
                 messages=messages,
                 tools=tool_defs,
                 stream=False,
             )
 
-            full_response = ""
-            partial_calls: Dict[str, Dict[str, Any]] = {}
+            full_reply = ""
+            ongoing: Dict[int, Dict[str, Any]] = {}
 
-            for choice in getattr(response, 'choices', []):
-                msg = getattr(choice, 'message', None)
-                if msg and getattr(msg, 'content', None):
-                    full_response += msg.content
-
-                # Tool call varsa topla
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        entry = partial_calls.setdefault(
-                            str(tc.id),
+            for choice in resp.choices:
+                msg = choice.message
+                if msg.content:
+                    full_reply += msg.content
+                if msg.tool_calls:
+                    await self._notify_status({"state": AgentStatus.TOOL_CALLING.value, "phase": "tools"})
+                    for idx,tc in msg.tool_calls:
+                        entry = ongoing.setdefault(
+                            idx,
                             {
-                                "id": str(tc.id),
+                                "id": tc.id,
                                 "type": tc.type,
                                 "name": tc.function.name,
                                 "arguments": "",
-                            }
+                            },
                         )
                         entry["arguments"] += tc.function.arguments or ""
 
-            if isinstance(full_response, str) and full_response.strip():
-                memory_manager.add_assistant_reply(full_response)
-            elif isinstance(full_response, dict):
-                memory_manager.add_assistant_reply(json.dumps(full_response, ensure_ascii=False))
+            if full_reply.strip():
+                memory_manager.add_assistant_reply(full_reply)
 
-            if not partial_calls:
-                self._save_context(memory_manager)
-                return full_response
+            if ongoing:
+                for call in ongoing.values():
+                    if not (call["id"] and call["name"] and call["type"]):
+                        continue
+                    args = self._parse_tool_arguments(call)
+                    if not args:
+                        continue
+                    memory_manager.add_tool_calls({call["id"]: call})
+                    try:
+                        result = await tool_client.call_tool(call["id"], call["name"], args)
+                        if not isinstance(result, str):
+                            result = json.dumps(result, ensure_ascii=False)
+                    except Exception as ex:
+                        await self._notify_status({"state": AgentStatus.ERROR.value})
+                        result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
+                    memory_manager.add_tool_result(call["id"], result)
 
-            # Tüm tool çağrılarını sırayla işle!
-            tool_call_results = {}
-            for call_id, call in partial_calls.items():
-                memory_manager.add_tool_calls({call_id: call})
-                try:
-                    args = {}
-                    if call["arguments"]:
-                        try:
-                            args = json.loads(call["arguments"])
-                        except Exception as e:
-                            print(f"⚠️ JSON decode error: {e} (input: {call['arguments']!r})")
-                            args = {}
-                    result = await tool_client.call_tool(call_id, call["name"], args)
-                    if not isinstance(result, str):
-                        result = json.dumps(result, ensure_ascii=False)
-                    memory_manager.add_tool_result(call_id, result)
-                    tool_call_results[call_id] = result
-                except Exception as ex:
-                    print(f"⚠️ Tool execution failed: {ex}")
-                    error_json = json.dumps({
-                        "error": "TOOL EXECUTION FAILED",
-                        "detail": str(ex)
-                    })
-                    memory_manager.add_tool_result(call["id"], error_json)
-                    tool_call_results[call_id] = error_json
-
+            await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
             self._save_context(memory_manager)
-            
-    def _save_context(self, memory_manager: ContextMemoryManager):
-        """İsteğe bağlı: context'i diske yaz."""
-        try:
-            with open("context_refined.json", "w", encoding="utf-8") as f:
-                json.dump(memory_manager.get_all_messages(), f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"⚠️ Failed to save context: {e}")
-    async def list_models(self) -> list[dict]:
-            """OpenAI'dan erişilebilir modelleri çeker (kendi API anahtarın ile)."""
-            if self.client is None:
-                raise RuntimeError("Agent not initialized – use `async with`")
-
-            models = await self.client.models.list()
-            model_list = []
-            for model in models.data:
-                # Sadece GPT içerenleri göstermek için:
-                if "gpt" in model.id:
-                    model_list.append({
-                        "value": model.id,
-                        "label": model.id.replace("-", " ").upper()
-                    })
-            return model_list
+            return full_reply
+        except Exception as err:
+            await self._notify_status({"state": AgentStatus.ERROR.value})
+            raise

@@ -1,27 +1,18 @@
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+import os, asyncio, logging, traceback, uuid, json
+from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from openai_agent import OpenAIAgent
 from context_memory import ContextMemoryManager
 from tool_router import ToolRouter
 from tool_stdio_client import ToolStdioClient
 from tool_websocket_client import ToolWebSocketClient
-
-
-from dotenv import load_dotenv
-load_dotenv()  # .env dosyasını yükle
-
 from project.init import setup_all
-
-
-import os
-import asyncio
-import logging
-from contextlib import asynccontextmanager
-import traceback
-import json
-import uuid
 
 logger = logging.getLogger("xray")
 logging.basicConfig(level=logging.INFO)
@@ -30,36 +21,55 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 ws_clients = set()  # Aktif frontend websocket bağlantıları
 
-# --- FastAPI Initialization & Lifespan ---
+active_job: dict[str, asyncio.Task] = {}
+backend_status = {"state": "idle", "tps": 0.0, "job_id": None}
 
+def _update_status(state: str, tps: float = 0.0, job_id: str | None = None):
+    backend_status.update({"state": state, "tps": round(tps, 2), "job_id": job_id})
+
+
+async def agent_status_notify(status):
+    print("------------>AGENT STATUS UPDATE:", status)
+    await broadcast_ws_event({"event": "agent_status", "data": status})
+
+
+async def broadcast_ws_event(event_data):
+    """Bütün WS istemcilerine gönder; kapananları at."""
+    closed = set()
+    for ws in ws_clients:
+        try:
+            await ws.send_json(event_data)
+        except Exception:
+            closed.add(ws)
+    ws_clients.difference_update(closed)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     tool_clients = []
     setup_all(app, tool_clients=tool_clients)
 
     MCP_REMOTE_CLIENTS = [
-        ToolStdioClient(server_id="playwright", command="npx", args=["-y", "@playwright/mcp@latest"]),
-        ToolStdioClient(server_id="simulator", command="python", args=["pw_simulator/main.py"]),
+        ToolStdioClient(server_id="investigate", command="npx", args=["-y", "@playwright/mcp@latest"]),
+        ToolStdioClient(server_id="simulator",  command="python", args=["pw_simulator/main.py"]),
     ]
-    # Tek bir WebSocketClient, memory ve tool events için
     app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
-    app.state.router = ToolRouter([
-        *MCP_REMOTE_CLIENTS,
-        *tool_clients,
-        app.state.ui_tool_client
-    ])
+    app.state.router = ToolRouter([*MCP_REMOTE_CLIENTS, *tool_clients, app.state.ui_tool_client])
     await app.state.router.__aenter__()
+
     app.state.memory = ContextMemoryManager(system="You are a helpful assistant.")
-    app.state.memory.add_observer(memory_observer_callback)
-    app.state.agent = OpenAIAgent(api_key=OPENAI_API_KEY)
+    app.state.memory.add_observer(lambda snap: asyncio.create_task(
+        broadcast_ws_event({"event": "memory_update", "data": snap})
+    ))
+
+    app.state.agent = OpenAIAgent(api_key=OPENAI_API_KEY, on_status_update=agent_status_notify)
     await app.state.agent.__aenter__()
+
     yield
+
     await app.state.agent.__aexit__(None, None, None)
     await app.state.router.__aexit__(None, None, None)
 
+
 app = FastAPI(lifespan=lifespan)
-
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -67,61 +77,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- WebSocket endpoint ---
+# ----------------- WebSocket -----------------
 @app.websocket("/ws/bridge")
-async def ws_tools(websocket: WebSocket):
-    await websocket.accept()
-    ws_clients.add(websocket)
+async def ws_bridge(ws: WebSocket):
+    await ws.accept()
+    ws_clients.add(ws)
     try:
-        # İlk bağlantıda memory snapshot'ı gönder (isteğe bağlı)
         if hasattr(app.state, "memory"):
-            snapshot = app.state.memory.get_memory_snapshot()
-            await websocket.send_json({"event": "memory_update", "data": snapshot})
+            await ws.send_json({"event": "memory_update",
+                                "data": app.state.memory.get_memory_snapshot()})
         while True:
-            data = await websocket.receive_text()
-            msg = json.loads(data)
-            # 1. Tool çağrısı: backend, frontend'e yönlendirir
-            if msg.get("event") == "tool_call":
-                # Burada frontend bir tool'a cevap dönecekse bekleyebilirsin (ya da iletirsin)
-                # Eğer backend de tool handler ise burada çalıştırıp cevapla!
-                print(f"WS tool_call: {msg}")
-                # İstersen event'i diğer websocketlere broadcast edebilirsin
-                await broadcast_ws_event(msg)
-            # 2. Tool sonucu: tool çağrısını başlatan backend/agent future'ına sonucu döndür
-            elif msg.get("event") == "tool_result":
-                call_id = msg.get("call_id")
-                result = msg.get("result")
-                # ToolWebSocketClient future çözümü:
-                await app.state.ui_tool_client.receive_tool_result(call_id, result)
-            # 3. İsteğe bağlı: başka event'ler (memory_update vs)
-    except WebSocketDisconnect:
-        ws_clients.remove(websocket)
+            raw = await ws.receive_text()
+            msg = json.loads(raw)
 
-# --- WebSocket Broadcast Helper ---
-async def broadcast_ws_event(event_data):
-    closed_clients = set()
-    for ws in ws_clients:
-        try:
-            await ws.send_json(event_data)
-        except Exception:
-            closed_clients.add(ws)
-    ws_clients.difference_update(closed_clients)
+            if msg.get("event") == "tool_call":
+                await broadcast_ws_event(msg)                           # diğer clientlara ilet
+            elif msg.get("event") == "tool_result":
+                await app.state.ui_tool_client.receive_tool_result(msg["call_id"], msg["result"])
+    except WebSocketDisconnect:
+        ws_clients.discard(ws)
+
 
 # --- Memory Observer: memory değişince tüm WS clientlara bildir ---
 def memory_observer_callback(snapshot):
+    print("--------------------------->DEBUG: memory_observer_callback triggered")
     asyncio.create_task(
         broadcast_ws_event({"event": "memory_update", "data": snapshot})
     )
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.exception("API genel hata: %s", exc)
     return JSONResponse(
         status_code=500,
-        content={
-            "error": str(exc),
-            "trace": traceback.format_exc()
-        }
+        content={"error": str(exc), "trace": traceback.format_exc()}
     )
 
 @app.post("/api/ui_tools/add")
@@ -219,22 +207,12 @@ async def delete_message(msg_id: str):
         return {"status": "ok"}
     return {"error": "Mesaj bulunamadı"}
 
-@app.post("/api/chat/ask")
-async def ask(request: Request):
-    data = await request.json()
-    user_message = data["message"]
-    model = data.get("model")
-    print(f"---------------------------------User message: {user_message!r}, model: {model!r}")
-    reply = await app.state.agent.ask(
-        tool_client=app.state.router,
-        prompt=user_message,
-        memory_manager=app.state.memory,
-        model=model,
-    )
-    return {"reply": reply}
+
 
 @app.post("/api/chat/replay")
 async def replay_chat(request: Request):
+    data = await request.json()
+    model = data.get("model")
     memory = app.state.memory
     base_msgs = [m.copy() for m in memory.get_all_messages() if m["role"] in ("system", "user")]
     memory.clear()
@@ -246,16 +224,18 @@ async def replay_chat(request: Request):
                 tool_client=app.state.router,
                 prompt=msg["content"],
                 memory_manager=memory,
-                model="gpt-4.1-nano"
+                model=model,            # <-- model burada eklenmeli
+                stream=False
             )
     memory._notify_observers()
     return {"status": "ok"}
+
 
 @app.post("/api/chat/replay_until/{until_id}")
 async def replay_until_message(until_id: str, request: Request):
     memory = app.state.memory
     data = await request.json()
-    model = data.get("model", "gpt-4.1-nano")
+    model = data.get("model")
     original_msgs = [m.copy() for m in memory.get_all_messages()]
     idx = next((i for i, m in enumerate(original_msgs) if m["id"] == until_id and m["role"] == "user"), None)
     if idx is None:
@@ -341,20 +321,81 @@ async def set_chat_prompts(request: Request):
 
 @app.get("/api/tools")
 async def list_tools():
-    tools = await app.state.router.list_tools()
-    return {"tools": tools}
+    return {"tools": await app.state.router.list_tools()}
 
 @app.post("/api/tools/run")
 async def run_tool(request: Request):
     data = await request.json()
-    tool_name = data.get("tool_name")
-    params = data.get("params", {})
     call_id = data.get("call_id") or str(uuid.uuid4())
     try:
-        result = await app.state.router.call_tool(call_id, tool_name, params)
+        result = await app.state.router.call_tool(call_id,
+                                                  data["tool_name"],
+                                                  data.get("params", {}))
         return {"output": result}
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+@app.post("/api/chat/ask")
+async def ask(request: Request):
+    data = await request.json()
+    reply = await app.state.agent.ask(app.state.router,
+                                      data["message"],
+                                      app.state.memory,
+                                      data.get("model"),
+                                      stream=False)
+    return {"reply": reply}
+
+# ----------------- *** STREAMING ENDPOINT *** -----------------
+@app.post("/api/chat/ask_stream")
+async def ask_stream(request: Request):
+    data = await request.json()
+    prompt = data["message"]
+    model  = data.get("model")
+    job_id = str(uuid.uuid4())
+    _update_status("running", job_id=job_id)
+
+    async def gen():
+        task = asyncio.current_task()
+        active_job[job_id] = task
+
+        try:
+            # -------- FIX: önce coroutine'i await et, sonra async-generator'u iterate et ----------
+            agent_stream = await app.state.agent.ask(app.state.router,
+                                                     prompt,
+                                                     app.state.memory,
+                                                     model,
+                                                     stream=True)
+            async for sse in agent_stream:
+                try:
+                    payload = json.loads(sse.removeprefix("data: ").strip())
+                    if payload.get("type") == "end":
+                        _update_status("idle", payload.get("tps", 0), None)
+                except Exception:
+                    pass
+                yield sse if sse.startswith("data:") else f"data: {sse}\n\n"
+            # --------------------------------------------------------------------------------------
+        except asyncio.CancelledError:
+            yield "data: " + json.dumps({"type": "stopped"}) + "\n\n"
+        finally:
+            active_job.pop(job_id, None)
+            if backend_status["job_id"] == job_id:
+                _update_status("idle", 0, None)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+@app.post("/api/chat/stop")
+async def stop_job():
+    task = active_job.get(backend_status.get("job_id"))
+    if task:
+        task.cancel()
+        return {"status": "cancelling"}
+    return {"status": "idle"}
+
+
+
+@app.get("/api/chat/status")
+async def get_status():
+    return backend_status
 
 
 if __name__ == "__main__":

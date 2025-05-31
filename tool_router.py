@@ -50,14 +50,13 @@ class ToolRouter(ToolClient):
                 })
         return tools
 
-    async def call_tool(self,call_id: str, name: str, args: dict) -> str:
-        """
-        Call a registered tool by its unique (prefixed) name.
-        """
+    async def call_tool(self, call_id: str, name: str, args: dict) -> str:
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"Tool name must be a non-empty string, got: {repr(name)}")
         for client in self.active_clients:
             client_id = getattr(client, 'server_id', getattr(client, 'client_id', str(id(client))))
             prefix = f"{client_id}__"
             if name.startswith(prefix):
                 raw_name = name[len(prefix):]
-                return await client.call_tool(call_id,raw_name, args)
-        raise ValueError(f"Tool '{name}' not found")
+                return await client.call_tool(call_id, raw_name, args)
+        raise ValueError(f"Tool '{name}' not found (called with args={args})")

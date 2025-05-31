@@ -1,5 +1,4 @@
 from typing import Any, Dict, List, Optional, Callable
-import uuid
 from nanoid import generate
 
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -9,22 +8,21 @@ def nanoid(size=NANOID_SIZE):
     return generate(ALPHABET, size)
 
 def ensure_id(msg):
-    msg = dict(msg)  # Kopyala (güvenlik için)
+    msg = dict(msg)
     msg["id"] = nanoid(8)
     return msg
 
-
 class ContextMemoryManager:
-    def __init__(
-        self,
-        system: Optional[str] = None,
-    ):
+    def __init__(self, system: Optional[str] = None):
         self._messages: List[Dict[str, Any]] = []
         self._observers: List[Callable] = []
         if system is not None:
             self.set_system_message(system)
 
-
+    def get_memory_snapshot(self):
+        return {
+            "messages": self._messages
+        }
     
     def add_observer(self, callback: Callable) -> None:
         self._observers.append(callback)
@@ -36,7 +34,7 @@ class ContextMemoryManager:
         snapshot = self.get_memory_snapshot()
         for cb in self._observers:
             cb(snapshot)
-
+            
     def set_system_message(self, content: str) -> None:
         self._messages = [m for m in self._messages if m["role"] != "system"]
         self._messages.insert(0, ensure_id({
@@ -87,12 +85,6 @@ class ContextMemoryManager:
 
     def get_all_messages(self) -> List[Dict[str, Any]]:
         return self._messages.copy()
-
-    def get_memory_snapshot(self):
-        return {
-            "messages": self._messages
-        }
-
 
     def clear(self):
         """Tüm mesajları siler ve observerlara bildirir."""
