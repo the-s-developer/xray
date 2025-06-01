@@ -34,5 +34,36 @@
     "role": "assistant",
     "content": "Sayfa başarıyla yüklendi. Size nasıl yardımcı olabilirim?",
     "id": "HR2XN14Z"
+  },
+  {
+    "role": "user",
+    "content": "mev.gov.tr  ye git",
+    "id": "2PDLBB15"
+  },
+  {
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+      {
+        "type": "function",
+        "id": "call_ngPWEx9iNzsSRKkiw4DZeNoe",
+        "function": {
+          "name": "investigate__browser_navigate",
+          "arguments": "{\"url\":\"https://mev.gov.tr\"}"
+        }
+      }
+    ],
+    "id": "78EW9H31"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_ngPWEx9iNzsSRKkiw4DZeNoe",
+    "content": "Error: page.goto: net::ERR_NAME_NOT_RESOLVED at https://mev.gov.tr/\nCall log:\n\u001b[2m  - navigating to \"https://mev.gov.tr/\", waiting until \"domcontentloaded\"\u001b[22m",
+    "id": "S18EMDJM"
+  },
+  {
+    "role": "assistant",
+    "content": "Görünüşe göre mev.gov.tr sitesine ulaşım sağlanamıyor veya DNS çözümlemesi sırasında hata alındı. Başka bir siteye gitmek veya başka bir konuda yardımcı olmamı ister misiniz?",
+    "id": "FLJ9XX4J"
   }
 ]

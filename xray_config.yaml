@@ -73,7 +73,7 @@ models:
 
 # === TOOLS ===
 tools:
-  - id: investigate
+  - id: scout
     type: stdio
     command: npx
     args: ["-y", "@playwright/mcp@latest"]
