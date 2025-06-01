@@ -32,6 +32,11 @@ def _update_status(state: str, tps: float = 0.0, job_id: str | None = None):
 async def agent_status_notify(status):
     await broadcast_ws_event({"event": "agent_status", "data": status})
 
+async def set_status_and_notify(state: str, tps: float = 0.0, job_id: str | None = None):
+    _update_status(state, tps, job_id)
+    await agent_status_notify(backend_status)
+
+
 async def broadcast_ws_event(event_data):
     closed = set()
     for ws in ws_clients:
@@ -202,34 +207,53 @@ async def delete_message(msg_id: str):
 
 
 
+
 @app.post("/api/chat/replay")
 async def replay_chat(request: Request):
-    data = await request.json()
-    model = data.get("model")
-    memory = app.state.memory
-    router = app.state.router
-    models = getattr(app.state, "xray_models", [])
-    model_cfg = get_model_config(model, models)
-    base_msgs = [m.copy() for m in memory.get_all_messages() if m["role"] in ("system", "user")]
-    memory.clear()
-    for msg in base_msgs:
-        if msg["role"] == "system":
-            memory.add_message(msg)
-        elif msg["role"] == "user":
-            async with OpenAIAgent(
-                api_key=model_cfg["api_key"],
-                base_url=model_cfg["base_url"],
-                model_id=model,
-                tool_client=router,
-                memory_manager=memory,
-                on_status_update=agent_status_notify,
-            ) as agent:
-                await agent.ask(
-                    msg["content"],
-                    stream=False
-                )
-    memory._notify_observers()
-    return {"status": "ok"}
+    # Single job kontrolü: başka bir iş varsa 409 döndür
+    if backend_status["state"] == "running":
+        return JSONResponse({"error": "Başka bir iş zaten çalışıyor."}, status_code=409)
+    
+    # Status "running" yapılır
+    await set_status_and_notify("running")
+    try:
+        data = await request.json()
+        model = data.get("model")
+        memory = app.state.memory
+        router = app.state.router
+        models = getattr(app.state, "xray_models", [])
+        model_cfg = get_model_config(model, models)
+
+        # Sadece "system" ve "user" mesajlarını alıp memory'yi sıfırla
+        base_msgs = [m.copy() for m in memory.get_all_messages() if m["role"] in ("system", "user")]
+        memory.clear()
+        for msg in base_msgs:
+            if msg["role"] == "system":
+                memory.add_message(msg)
+            elif msg["role"] == "user":
+                async with OpenAIAgent(
+                    api_key=model_cfg["api_key"],
+                    base_url=model_cfg["base_url"],
+                    model_id=model,
+                    tool_client=router,
+                    memory_manager=memory,
+                    on_status_update=agent_status_notify,
+                ) as agent:
+                    await agent.ask(
+                        msg["content"],
+                        stream=False
+                    )
+        memory._notify_observers()
+        return {"status": "ok"}
+    except Exception as exc:
+        logger.exception("Replay sırasında hata oluştu: %s", exc)
+        # Hata durumunda status sıfırla
+        await set_status_and_notify("idle")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    finally:
+        # Ne olursa olsun status idle'a çek
+        await set_status_and_notify("idle")
+
 
 
 
@@ -312,6 +336,37 @@ async def reset_state():
     app.state.memory._notify_observers()
     return {"status": "ok", "message": "Context/memory resetlendi."}
 
+@app.post("/api/chat/restart")
+async def restart_backend():
+    # Aktif job varsa iptal et
+    job_id = backend_status.get("job_id")
+    task = active_job.get(job_id)
+    if task:
+        task.cancel()
+        active_job.pop(job_id, None)
+
+    # Memory sıfırla
+    old_observers = list(getattr(app.state.memory, "_observers", []))
+    app.state.memory = ContextMemoryManager(system="You are a helpful assistant.")
+    for cb in old_observers:
+        app.state.memory.add_observer(cb)
+    app.state.memory._notify_observers()
+    # --- Ek olarak: Manuel ws memory update event'i gönder ---
+    await broadcast_ws_event({
+        "event": "memory_update",
+        "data": app.state.memory.get_memory_snapshot()
+    })
+
+    # Backend status sıfırla
+    await set_status_and_notify("idle", 0, None)
+
+    # Gerekirse frontend'e reset event'i yayınla
+    await broadcast_ws_event({"event": "backend_reset"})
+
+    return {"status": "ok", "message": "Backend resetlendi."}
+
+
+
 @app.get("/api/chat/prompts")
 async def get_chat_prompts():
     # Tüm mesajları, olduğu gibi (tüm roller dahil) döndür
@@ -370,11 +425,13 @@ async def ask(request: Request):
 
 @app.post("/api/chat/ask_stream")
 async def ask_stream(request: Request):
+    if backend_status["state"] == "running":
+        return JSONResponse({"error": "Başka bir iş zaten çalışıyor."}, status_code=409)
     data = await request.json()
     prompt = data["message"]
     model_id = data.get("model")
     job_id = str(uuid.uuid4())
-    _update_status("running", job_id=job_id)
+    await set_status_and_notify("running", job_id=job_id)
     models = getattr(app.state, "xray_models", [])
     model_cfg = get_model_config(model_id, models)
 
@@ -396,7 +453,7 @@ async def ask_stream(request: Request):
                     try:
                         payload = json.loads(sse.removeprefix("data: ").strip())
                         if payload.get("type") == "end":
-                            _update_status("idle", payload.get("tps", 0), None)
+                            await set_status_and_notify("idle", payload.get("tps", 0), None)
                     except Exception:
                         pass
                     yield sse if sse.startswith("data:") else f"data: {sse}\n\n"
@@ -405,7 +462,7 @@ async def ask_stream(request: Request):
         finally:
             active_job.pop(job_id, None)
             if backend_status["job_id"] == job_id:
-                _update_status("idle", 0, None)
+                await set_status_and_notify("idle", 0, None)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
