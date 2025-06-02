@@ -46,18 +46,6 @@ class OpenAIAgent:
             if hasattr(maybe_coro, "__await__"):
                 await maybe_coro
 
-    def _save_context(self):
-        try:
-            with open("context_refined.json", "w", encoding="utf-8") as f:
-                json.dump(
-                    self.memory_manager.get_all_messages(),
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-        except Exception as e:
-            print(f"⚠️ Failed to save context: {e}")
-
     def _parse_tool_arguments(self, call):
         arguments = call.get("arguments", "")
         if not arguments:
@@ -95,8 +83,9 @@ class OpenAIAgent:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
             loop_guard += 1
 
-            self.memory_manager.retain_last_tool_call_pairs(3)
-            messages = self.memory_manager.get_all_messages()
+            messages = self.memory_manager.refine_view()
+
+
 
             resp = await self.client.chat.completions.create(
                 model=self.model_id,
@@ -142,7 +131,6 @@ class OpenAIAgent:
             break            # ne cevap ne tool-call
 
         await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
-        self._save_context()
         return reply
 
 
@@ -172,10 +160,14 @@ class OpenAIAgent:
             tool_parts: dict[int, dict[str, Any]] = defaultdict(
                 lambda: {"id": None, "type": None, "name": None, "arguments": ""}
             )
-
-            self.memory_manager.retain_last_tool_call_pairs(3)
-            messages = self.memory_manager.get_all_messages()
-
+            
+            messages = self.memory_manager.refine_view()
+            with open("refined_memory_dump.json", "w") as f:
+                json.dump(messages, f, indent=2, ensure_ascii=False)
+            
+            with open("orginal_memory_dump.json", "w") as f:
+                json.dump(self.memory_manager.get_memory_snapshot(), f, indent=2, ensure_ascii=False)
+                
             stream_resp = await self.client.chat.completions.create(
                 model=self.model_id,
                 messages=messages,
@@ -237,15 +229,20 @@ class OpenAIAgent:
             # --- döngü sonu karar ---
             if buffer.strip():
                 self.memory_manager.add_assistant_reply(buffer)
+                messages = self.memory_manager.refine_view()
+                with open("refined_memory_dump.json", "w") as f:
+                    json.dump(messages, f, indent=2, ensure_ascii=False)
+            
+                with open("orginal_memory_dump.json", "w") as f:
+                    json.dump(self.memory_manager.get_memory_snapshot(), f, indent=2, ensure_ascii=False)
+                                
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
-                self._save_context()
                 yield json.dumps({"type": "end", "tps": tps()})
                 break
             elif tool_call_happened:
                 continue
             else:
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
-                self._save_context()
                 yield json.dumps({"type": "end", "tps": tps()})
                 break
 

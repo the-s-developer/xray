@@ -57,13 +57,16 @@ async def lifespan(app: FastAPI):
     app.state.xray_models = models
     app.state.xray_tools = tools
     setup_all(app, tool_clients=tool_clients)
-    app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
-    app.state.router = ToolRouter([*tool_clients, app.state.ui_tool_client])
-    await app.state.router.__aenter__()
+    
     app.state.memory = ContextMemoryManager(system="You are a helpful assistant.")
     app.state.memory.add_observer(lambda snap: asyncio.create_task(
         broadcast_ws_event({"event": "memory_update", "data": snap})
-    ))
+    ))   
+    app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
+    app.state.recall_client = app.state.memory.tool_client()
+    app.state.router = ToolRouter([*tool_clients, app.state.ui_tool_client, app.state.recall_client])
+    await app.state.router.__aenter__()
+
     yield
     await app.state.router.__aexit__(None, None, None)
 
@@ -165,13 +168,14 @@ async def update_message(msg_id: str, request: Request):
         return {"error": "content must be string"}
     messages = app.state.memory._messages
     for msg in messages:
-        if msg.get("id") == msg_id:
+        print(msg)
+        if msg["meta"]["id"] == msg_id:
             msg["content"] = content
             # Eğer mesajda id yoksa, yeni id ekle
-            if not msg.get("id"):
-                msg["id"] = app.state.memory._new_id()
+            if not msg["meta"]["id"]:
+                msg["meta"]["id"] = app.state.memory._new_id()
             app.state.memory._notify_observers()
-            return {"status": "ok", "message": "Updated.", "id": msg["id"]}
+            return {"status": "ok", "message": "Updated.", "id": msg["meta"]["id"]}
     return {"error": "message not found"}
 
 
@@ -196,7 +200,7 @@ async def delete_message(msg_id: str):
     messages = app.state.memory._messages
     found = False
     for i, msg in enumerate(messages):
-        if msg.get("id") == msg_id:
+        if msg["meta"]["id"] == msg_id:
             del messages[i]
             found = True
             break
@@ -266,7 +270,7 @@ async def replay_until_message(until_id: str, request: Request):
     models = getattr(app.state, "xray_models", [])
     model_cfg = get_model_config(model, models)
     original_msgs = [m.copy() for m in memory.get_all_messages()]
-    idx = next((i for i, m in enumerate(original_msgs) if m["id"] == until_id and m["role"] == "user"), None)
+    idx = next((i for i, m in enumerate(original_msgs) if m["meta"]["id"] == until_id and m["role"] == "user"), None)
     if idx is None:
         return {"error": "Böyle bir user mesajı yok"}
     before = []
@@ -305,13 +309,13 @@ async def bulk_delete(request: Request):
     data = await request.json()
     ids_to_delete = set(data.get("ids", []))
     msgs = memory._messages
-    protected_ids = [m["id"] for m in msgs if m["role"] == "system"]
+    protected_ids = [m["meta"]["id"] for m in msgs if m["role"] == "system"]
     ids_to_delete -= set(protected_ids)
     new_msgs = []
     i = 0
     while i < len(msgs):
         m = msgs[i]
-        if m["id"] in ids_to_delete:
+        if m["meta"]["id"] in ids_to_delete:
             if m["role"] == "user":
                 i += 1
                 while i < len(msgs) and msgs[i]["role"] in ("assistant", "tool"):
