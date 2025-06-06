@@ -189,19 +189,48 @@ async def find_script_by_id(db, script_id):
     script = await db.scripts.find_one({"scriptId": script_id})
     return drop_mongo_id(script) if script else None
 
-async def run_script_for_project(db, project_id, script_id=None, max_count=3):
-    # Script bulma mantığı (script_id öncelikli)
+
+async def run_script_for_project(db, project_id, script_id=None, script_version=None, max_count=3):
+    """
+    Belirtilen project_id için bir script çalıştırır.
+    - script_id ve script_version ikisi verilirse: o script'in ilgili versiyonunu bulur.
+    - Sadece script_id verilirse: o script_id'nin en yeni (büyük) versiyonunu bulur.
+    - Sadece script_version verilirse: o versiyonu bulur.
+    - Hiçbiri verilmezse: Bu projenin en yeni scriptini bulur.
+    """
     script = None
-    if script_id:
-        script = await db.scripts.find_one({"projectId": project_id, "scriptId": script_id})
-    if not script:
-        # ScriptId yoksa en son versiyonu getir
+
+    # 1. Hem script_id hem script_version varsa
+    if script_id and script_version is not None:
+        script = await db.scripts.find_one({
+            "projectId": project_id,
+            "scriptId": script_id,
+            "version": int(script_version)
+        })
+
+    # 2. Sadece script_id varsa (en yeni versiyonunu bul)
+    elif script_id:
+        scripts = await db.scripts.find({"projectId": project_id, "scriptId": script_id}).sort("version", -1).to_list(1)
+        if scripts:
+            script = scripts[0]
+
+    # 3. Sadece script_version varsa (o versiyonu bul)
+    elif script_version is not None:
+        script = await db.scripts.find_one({
+            "projectId": project_id,
+            "version": int(script_version)
+        })
+
+    # 4. Hiçbiri yoksa (bu projenin en yeni scripti)
+    else:
         scripts = await db.scripts.find({"projectId": project_id}).sort("version", -1).to_list(1)
         if scripts:
             script = scripts[0]
-    if not script:
-        raise ValueError(f"Script not found (project_id={project_id}, script_id={script_id})")
 
+    if not script:
+        raise ValueError(f"Script not found (project_id={project_id}, script_id={script_id}, script_version={script_version})")
+
+    # Scripti çalıştır
     result = await execute_python_code(
         script["code"],
         no_prints=False,
@@ -227,11 +256,10 @@ async def run_script_for_project(db, project_id, script_id=None, max_count=3):
         "endTime": now,
         "duration": 1,
         "resultCount": len(output_json.get("data", [])) if output_json and isinstance(output_json, dict) and "data" in output_json else 0,
-        "output": json.dumps(output_json, ensure_ascii=False) if output_json else "",     # BURASI
-        "logs": logs if logs else "",                                                    # BURASI
-        "errorMessage": error or "",                                                     # BURASI
+        "output": json.dumps(output_json, ensure_ascii=False) if output_json else "",
+        "logs": logs if logs else "",
+        "errorMessage": error or "",
         "result": output_json if isinstance(output_json, dict) else {},
     }
     await db.executions.insert_one(execution)
     return drop_mongo_id(execution)
-

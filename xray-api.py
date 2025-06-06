@@ -208,6 +208,23 @@ async def delete_message(msg_id: str):
         return {"status": "ok"}
     return {"error": "Mesaj bulunamadı"}
 
+@app.post("/api/chat/delete_after/{msg_id}")
+async def delete_after_message(msg_id: str):
+    memory = app.state.memory
+    msgs = memory._messages
+    index = next((i for i, m in enumerate(msgs) if m.get("meta", {}).get("id") == msg_id), None)
+    if index is None:
+        return {"error": "Mesaj bulunamadı"}
+    # System prompt’u asla silme!
+    protected_ids = [m["meta"]["id"] for m in msgs if m["role"] == "system"]
+    del_msgs = msgs[index:]  # kendisi dahil, sonrakilerle birlikte
+    keep_msgs = msgs[:index]  # kendisine kadar (hariç)
+    # System prompt’u silmeye kalkarsa engelle!
+    if any(m["meta"]["id"] in protected_ids for m in del_msgs):
+        return {"error": "System prompt silinemez"}
+    memory._messages = keep_msgs
+    memory._notify_observers()
+    return {"status": "ok"}
 
 
 

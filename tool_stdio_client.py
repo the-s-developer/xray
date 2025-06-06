@@ -71,6 +71,6 @@ class ToolStdioClient(ToolClient):
         Call a tool and return the parsed JSON from the first text content,
         or the raw result as a fallback.
         """
-        print(f"[DEBUG] call_tool: tool_name={tool_name}, args={args}")
+        print(f"---------------------------------------------------------[DEBUG] call_tool: tool_name={tool_name}, args={args}")
         result = (await self.session.call_tool(tool_name, args)).model_dump()
         return result["content"][0]["text"]

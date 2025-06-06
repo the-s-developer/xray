@@ -52,6 +52,7 @@ async def run(project_id, script_id=None, script_version=None, max_count=3):
         sys.exit(1)
     print_execution(execution)
 
+
 def main():
     parser = argparse.ArgumentParser(description="XRAY CLI - Run a script for a project (direct db, no API)")
     parser.add_argument("project",   help="Project ID (required)")
