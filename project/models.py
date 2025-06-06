@@ -1,9 +1,16 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
+
+from typing import Optional, Dict, Any
 
 class Prompt(BaseModel):
     role: str
-    content: str
+    content: Optional[str] = None    # <--- artık None kabul ediyor!
+    meta: Optional[Dict[str, Any]] = None
+    # ek alanlar gerekiyorsa ekle
+    class Config:
+        extra = "allow"
+
 
 class Project(BaseModel):
     projectId: str
@@ -26,7 +33,6 @@ class ScriptVersion(BaseModel):
     notes: Optional[str] = ""
     class Config:
         extra = "ignore"
-
 
 class Execution(BaseModel):
     executionId: str

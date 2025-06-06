@@ -7,11 +7,13 @@ from typing import List
 from pw_simulator.pw_runner.runner import execute_python_code
 from project.utils import nanoid, now_iso, drop_mongo_id
 import json
+from project.models import Prompt
 
 # --- PROJECTS ---
 
 async def create_project(db, data):
     project_id = nanoid()
+    prompts = [Prompt(**p).dict() for p in data.get("prompts", [])]
     project = Project(
         projectId=project_id,
         projectName=data.get("projectName", ""),
@@ -20,11 +22,12 @@ async def create_project(db, data):
         scraperDomain=data.get("scraperDomain", ""),
         createdAt=now_iso(),
         updatedAt=now_iso(),
-        prompts=data.get("prompts", []),
+        prompts=prompts,
         executionConfig=data.get("executionConfig", {}),
     )
     await db.projects.insert_one(project.dict())
     return drop_mongo_id(project.dict())
+
 
 async def list_projects(db) -> List[dict]:
     docs = await db.projects.find({}).to_list(length=100)
@@ -53,9 +56,15 @@ async def delete_project(db, project_id):
 # --- PROMPTS ---
 
 async def update_prompts(db, project_id, prompts):
+    validated_prompts = []
+    for p in prompts:
+        prompt = Prompt(**p).dict() 
+        if prompt["role"] == "tool" and prompt.get("content") and len(prompt["content"]) > 5000:
+            prompt["content"] = prompt["content"][:1000] + "... [Truncated]"
+        validated_prompts.append(prompt)
     updated = await db.projects.find_one_and_update(
         {"projectId": project_id},
-        {"$set": {"prompts": prompts, "updatedAt": now_iso()}},
+        {"$set": {"prompts": validated_prompts, "updatedAt": now_iso()}},
         return_document=True
     )
     return drop_mongo_id(updated) if updated else None

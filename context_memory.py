@@ -22,11 +22,7 @@ def ensure_meta(msg):
 def get_token_count(text):
     # Basit: karakter/4 ≈ token hesabı (örnek)
     return int(len(text or "") / 4)
-recall_description = (
-    "Some messages are trimmed in history with '[message_id: ...]'. "
-    "This function returns the full content of a message when given its message_id. "
-    "Use this to recall any previous message that was cut or summarized."
-)
+
 
 class ContextMemoryManager:
     def __init__(self, system: Optional[str] = None):
@@ -34,35 +30,6 @@ class ContextMemoryManager:
         self._observers: List[Callable] = []
         if system is not None:
             self.set_system_message(system)
-
-    def tool_client(self):
-        client = ToolLocalClient(server_id="context-memory-manager")
-        client.register_tool(
-            "recall",
-            self.recall,
-            description=recall_description,
-            parameters={
-                "type": "object",
-                "properties": {
-                    "message_id": {
-                        "type": "string",
-                        "description": "The ID of the message you want to fully recall."
-                    }
-                },
-                "required": ["message_id"]
-            }
-        )
-        return client
-
-    def recall(self, message_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Returns the full message and appends a tool message with recalled_from meta.
-        Also marks the original message with recalled_by.
-        """
-        for msg in self._messages:
-            if msg.get("meta", {}).get("id") == message_id:
-                return "[RECALLED FROM: " + message_id+ "] "+msg.get("content", "")
-        return ""
 
     def get_memory_snapshot(self):
         return {
@@ -142,135 +109,169 @@ class ContextMemoryManager:
     def add_message(self, msg):
         self._messages.append(ensure_meta(msg.copy()))
 
-
     def refine_view(
         self,
-        token_limit: int = 60_000,
-    ) -> list:
+        context_size=1000000,
+        enable_trace=True,
+    ):
         """
-        Context’i token_limit sınırına göre daraltır; 
-        assistant.tool_calls ↔ tool mesajlarını daima eşli (pair) tutar.
-        """
-        from copy import deepcopy
+        Refine_view fonksiyonunun işlevi:
+        
+        1. **Amaç:**  
+           - Tüm mesaj geçmişinden, toplam token (veya karakter) sınırını aşmayacak şekilde  
+             mantıksal olarak tutarlı ve kopuksuz bir context (mesaj dizisi) oluşturmak.
+           - Özellikle tool call ve tool response çiftlerini **daima birlikte** tutmak,
+             arka arkaya iki user veya yanıtı eksik kalan tool call bırakmamak.
 
+        2. **Çalışma Prensibi:**
+           - Mesajları (system mesajı hariç) en yenisinden en eskiye sıralar.
+           - Her assistant tool çağrısı için, ilgili tüm tool yanıtları varsa
+             *çift* olarak birlikte ekler (ve ikisi de token limitine sığıyorsa).
+           - Tek başına kalan, pair’i olmayan tool call veya tool response mesajlarını
+             **asla eklemez** (bağlam bütünlüğü bozulmasın diye).
+           - Sadece user veya tool_calls olmayan assistant mesajları ise,
+             token limitine sığıyorsa tek başına eklenir.
+           - Her eklenen mesajın ID’si takip edilir, çiftler tekrar tekrar eklenmez.
+           - Her eklemede toplam token (karakter/4) miktarı izlenir, aşılırsa ekleme durur.
+           - System mesajı (varsa) en sona eklenir (aslında başa koymak gerekebilir, istersen tersine çevir).
+
+        3. **Neden bu yöntem?**
+           - LLM context’inde **kopuk, cevapsız user promptu**, ya da pair’i eksik tool call bırakmak, modelin akışını bozar.
+           - Bu yöntem, sadece “tam diyalog bloklarını” (user+assistant veya assistant[tool_call]+tool) içeri alır.
+           - Token limitinin verimli kullanılmasını ve anlam bütünlüğünü garanti eder.
+
+        4. **Sonuç:**
+           - Refined context, “sliding window” ile, token sınırına uygun ve her zaman tutarlı
+             (kopuk olmayan, cevapsız user promptu veya tool pair’i bırakmayan) bir geçmiş üretir.
+
+        5. **Debug/Trace:**
+           - enable_trace parametresi True ise, hangi mesajların neden eklenip eklenmediğini stdout’a basar.
+
+        NOT:  
+        - Eğer context limitine ilk sığmayan mesaj bir assistant+tool pair’iyse, o komple atlanır.
+        - Arka arkaya iki user, arka arkaya iki assistant veya pair’i eksik mesaj **asla eklenmez**.
+        """
+
+        def trace(*args):
+            if enable_trace:
+                print("[TRACE]", *args)
+
+        from copy import deepcopy
         snapshot = deepcopy(self._messages)
         if not snapshot:
             return []
 
-        # 1) System mesajı
         system_msg = snapshot[0] if snapshot[0]["role"] == "system" else None
+        if system_msg:
+            non_system_msgs = snapshot[1:]
+        else:
+            non_system_msgs = snapshot[:]
 
-        # 2) Hızlı index’ler
-        assistant_by_id = {m["meta"]["id"]: m for m in snapshot if m["role"] == "assistant"}
-        tool_msgs = [m for m in snapshot if m["role"] == "tool"]
+        # Pair indexlerini hazırla
+        tool_calls_by_id = {}
+        tool_msgs_by_call_id = {}
 
-        # tool_call_id  →  çağıran assistant_id
-        tool_call_to_assistant = {
-            tc["id"]: m["meta"]["id"]
-            for m in assistant_by_id.values()
-            if "tool_calls" in m
-            for tc in m["tool_calls"]
-        }
+        for m in non_system_msgs:
+            if m["role"] == "assistant" and m.get("tool_calls"):
+                for tc in m["tool_calls"]:
+                    tool_calls_by_id[tc["id"]] = m
+            if m["role"] == "tool" and m.get("tool_call_id"):
+                tool_msgs_by_call_id[m["tool_call_id"]] = m
 
-        # tool_call_id  →  tool mesajı
-        tool_call_to_tool = {m.get("tool_call_id"): m for m in tool_msgs}
+        # Kopyası, id ile hızlı erişim için
+        by_id = {m["meta"]["id"]: m for m in non_system_msgs}
 
-        # 3) En yeni tool + çağıranı
-        latest_tool = max(tool_msgs, key=lambda x: x["meta"]["created_at"], default=None)
-        latest_tool_call_id = latest_tool.get("tool_call_id") if latest_tool else None
-        latest_assistant_id = tool_call_to_assistant.get(latest_tool_call_id) if latest_tool_call_id else None
+        # Sliding window için en yeni → en eski
+        sorted_msgs = sorted(non_system_msgs, key=lambda x: x["meta"]["created_at"], reverse=True)
+        selected_ids = set()
+        total_tokens = 0
+        result_msgs = []
 
-        # 4) Yeni → eski dolaş
-        result, included_ids, total_tokens = [], set(), 0
-        for m in reversed(snapshot):
-            mid, role = m["meta"]["id"], m["role"]
+        for msg in sorted_msgs:
+            mid = msg["meta"]["id"]
 
-            # -- system sonradan eklenecek
-            if system_msg and mid == system_msg["meta"]["id"]:
-                continue
-
-            # ------------------------------------------------------------------
-            # A) EN YENİ tool çifti  (önce assistant, sonra tool)
-            # ------------------------------------------------------------------
-            if latest_tool and mid == latest_tool["meta"]["id"]:
-                # çağıran assistant’ı ekle
-                if latest_assistant_id and latest_assistant_id not in included_ids:
-                    a_msg = assistant_by_id.get(latest_assistant_id)
-                    if a_msg:
-                        a_tok = get_token_count(a_msg["content"] or "")
-                        if total_tokens + a_tok <= token_limit:
-                            result.append(a_msg)
-                            included_ids.add(latest_assistant_id)
-                            total_tokens += a_tok
-                # tool’u ekle
-                t_tok = get_token_count(latest_tool["content"] or "")
-                if total_tokens + t_tok <= token_limit and mid not in included_ids:
-                    result.append(latest_tool)
-                    included_ids.add(mid)
-                    total_tokens += t_tok
-                continue
-
-            # ------------------------------------------------------------------
-            # B) assistant.tool_calls  →  tüm tool’ları TAM bulabiliyorsak ekle
-            # ------------------------------------------------------------------
-            if role == "assistant" and "tool_calls" in m and mid not in included_ids:
-                call_ids = [tc["id"] for tc in m["tool_calls"]]
-                related_tools = [tool_call_to_tool.get(cid) for cid in call_ids]
-                if None in related_tools:          # Eksik tool varsa partner de eklenmez
+            # Tool çağrısı ise, pair'i var mı kontrol et
+            if msg["role"] == "assistant" and msg.get("tool_calls"):
+                all_pair_exists = True
+                for tc in msg["tool_calls"]:
+                    if tc["id"] not in tool_msgs_by_call_id:
+                        all_pair_exists = False
+                        break
+                if not all_pair_exists:
+                    trace(f"[SKIP] Tool çağrısının pair'i yok: {mid}")
                     continue
 
-                size = get_token_count(m["content"] or "") + \
-                    sum(get_token_count(tm["content"] or "") for tm in related_tools)
-                if total_tokens + size <= token_limit:
-                    # assistant
-                    result.append(m)
-                    included_ids.add(mid)
-                    total_tokens += get_token_count(m["content"] or "")
-                    # pair tool’lar
-                    for tm in related_tools:
-                        if tm["meta"]["id"] not in included_ids:
-                            result.append(tm)
-                            included_ids.add(tm["meta"]["id"])
-                            total_tokens += get_token_count(tm["content"] or "")
+                # Hepsi pair ise, hem assistant'ı hem tool mesajlarını ekle
+                chain = [msg]
+                for tc in msg["tool_calls"]:
+                    tmsg = tool_msgs_by_call_id[tc["id"]]
+                    chain.append(tmsg)
+                new_chain = [m for m in chain if m["meta"]["id"] not in selected_ids]
+                group_tokens = sum(len((m.get("content") or "")) // 4 for m in new_chain)
+                if total_tokens + group_tokens > context_size:
+                    trace(f"[SKIP] Pair limit dışı: {[m['role'] for m in new_chain]}")
+                    continue
+                result_msgs.extend(new_chain)
+                for m in new_chain:
+                    selected_ids.add(m["meta"]["id"])
+                total_tokens += group_tokens
+                trace(f"[PAIR] Eklendi: {[m['role'] for m in new_chain]} (t={group_tokens}, toplam={total_tokens})")
                 continue
 
-            # ------------------------------------------------------------------
-            # C) tool  →  çağıran assistant context’teyse ekle
-            # ------------------------------------------------------------------
-            if role == "tool" and mid not in included_ids:
-                a_id = tool_call_to_assistant.get(m.get("tool_call_id"))
-                if a_id and a_id in included_ids:
-                    t_tok = get_token_count(m["content"] or "")
-                    if total_tokens + t_tok <= token_limit:
-                        result.append(m)
-                        included_ids.add(mid)
-                        total_tokens += t_tok
+            # Tool cevabı ise, pair'inin assistant'ı var mı kontrol et
+            if msg["role"] == "tool" and msg.get("tool_call_id"):
+                a_msg = tool_calls_by_id.get(msg["tool_call_id"])
+                if not a_msg:
+                    trace(f"[SKIP] Tool cevabının pair'i yok: {mid}")
+                    continue
+                # Zaten pair eklenmişse tekrar eklemeye gerek yok
+                if a_msg["meta"]["id"] in selected_ids and mid in selected_ids:
+                    continue
+                # Bu tool çağrısı yukarıda zaten eklendiği için burada atla
                 continue
 
-            # ------------------------------------------------------------------
-            # D) user veya (tool_calls içermeyen) assistant
-            # ------------------------------------------------------------------
-            if mid in included_ids:
+            # Normal user & assistant (tool_calls olmayan)
+            if mid in selected_ids:
                 continue
+            t = len((msg.get("content") or "")) // 4
+            if total_tokens + t > context_size:
+                trace(f"[SKIP] Tekil token limit: {msg['role']} {mid}")
+                continue
+            result_msgs.append(msg)
+            selected_ids.add(mid)
+            total_tokens += t
+            trace(f"[TEKIL] Eklendi: {msg['role']} (t={t}, toplam={total_tokens}) -- {msg.get('content', '')[:60]}")
 
-            u_tok = get_token_count(m["content"] or "")
-            if total_tokens + u_tok <= token_limit:
-                result.append(m)
-                included_ids.add(mid)
-                total_tokens += u_tok
-
-        # 5) system en başa
         if system_msg:
-            result.append(system_msg)
+            result_msgs.append(system_msg)
+            trace("[SYSTEM] System mesajı eklendi.")
 
-        # 6) kronolojik sıraya geri dön
-        result.sort(key=lambda x: x["meta"]["created_at"])
-        return result
-
-
+        result_msgs.sort(key=lambda x: x["meta"]["created_at"])
+        return result_msgs
 
 
 
 
+import json
+
+if __name__ == "__main__":
+    # Your manager class must be imported or defined in the same script
+    manager = ContextMemoryManager()
+
+    # Read input messages from JSON file
+    with open("orginal.json", "r", encoding="utf-8") as f:
+        messages = json.load(f)
+
+    # Set all messages to manager
+    manager.set_messages(messages)
+
+    # Refine context (change context_size as needed)
+    refined = manager.refine_view(context_size=20000)
+
+    # Write refined messages to output JSON file
+    with open("refined.json", "w", encoding="utf-8") as f:
+        json.dump(refined, f, indent=2, ensure_ascii=False)
+
+    print(f"Refined {len(refined)} messages written to refined.json")
 
 

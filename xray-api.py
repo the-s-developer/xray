@@ -63,8 +63,7 @@ async def lifespan(app: FastAPI):
         broadcast_ws_event({"event": "memory_update", "data": snap})
     ))   
     app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
-    app.state.recall_client = app.state.memory.tool_client()
-    app.state.router = ToolRouter([*tool_clients, app.state.ui_tool_client, app.state.recall_client])
+    app.state.router = ToolRouter([*tool_clients, app.state.ui_tool_client])
     await app.state.router.__aenter__()
 
     yield
@@ -384,8 +383,8 @@ async def set_chat_prompts(request: Request):
     memory = app.state.memory
     memory.clear()
     for prm in prompts:
-        if prm["role"] in ("system", "user"):
-            memory.add_message({"role": prm["role"], "content": prm["content"]})
+        memory.add_message(prm)
+
     memory._notify_observers()
     return {"status": "ok"}
 

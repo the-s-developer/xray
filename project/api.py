@@ -5,11 +5,12 @@ from project.service import (
     create_project, list_projects, get_project, update_project, delete_project,
     save_script, list_scripts, find_script, update_script, delete_script,
     save_execution, list_executions, update_prompts, get_prompts,
-    set_current_project, get_current_project_by_state,run_script_for_project
+    set_current_project, get_current_project_by_state,run_script_for_project, update_prompts
 
 )
 
 from project.utils import drop_mongo_id, drop_mongo_ids
+from project.models import Prompt
 
 router = APIRouter()
 
@@ -128,14 +129,20 @@ async def get_project_executions_ep(
 
 
 # -- PROMPT ENDPOINTS --
-
 @router.post("/api/project/{project_id}/prompts", response_model=dict)
-async def set_project_prompts_ep(project_id: str, request: Request, prompts: List[dict] = Body(...)):
+async def set_project_prompts_ep(
+    project_id: str,
+    request: Request,
+    prompts: List[Prompt] = Body(...)
+):
     db = request.app.state.db
-    proj = await update_prompts(db, project_id, prompts)
+    prompt_dicts = [p.dict() for p in prompts]
+    proj = await update_prompts(db, project_id, prompt_dicts)
     if not proj:
         raise HTTPException(404, "Project not found")
     return drop_mongo_id(proj)
+
+
 
 @router.get("/api/project/{project_id}/prompts", response_model=List[dict])
 async def get_project_prompts_ep(project_id: str, request: Request):
