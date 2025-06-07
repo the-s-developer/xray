@@ -9,6 +9,12 @@ import os, asyncio, logging, traceback, uuid, json
 from dotenv import load_dotenv
 load_dotenv()
 
+#---
+import os
+os.environ["LOG_LEVEL"] = "error"
+os.environ["UVICORN_LOG_LEVEL"] = "error"
+#---
+
 from xray_config import load_xray_config, get_model_config, build_tool_from_config
 from openai_agent import OpenAIAgent
 from context_memory import ContextMemoryManager
@@ -503,4 +509,4 @@ async def get_status():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("xray-api:app", host="0.0.0.0", port=8000, reload=True, log_level="trace")
+    uvicorn.run("xray-api:app", host="0.0.0.0", port=8000, reload=True, log_level="error")

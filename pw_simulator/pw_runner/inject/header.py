@@ -32,4 +32,4 @@ def launch_persistent_with_env(self, *args, **kwargs):
 sync_browser_type.launch = launch_with_env
 sync_browser_type.launch_persistent_context = launch_persistent_with_env
 
-
+from playwright.sync_api import sync_playwright

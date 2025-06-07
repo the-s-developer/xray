@@ -26,11 +26,7 @@ mcp = FastMCP("pw_simulator")
 
 )
 async def execute_python_scraper_code(code: str):
-    with open("my_mcp.log", "a") as f:
-        f.write("---------------------------------------------------------------------------MCP-Code: {}\n".format(code))
     result = await execute_python_code(code, no_prints=False)
-    with open("my_mcp.log", "a") as f:
-        f.write("-------------------------RESULT: {}\n".format(result))
     return result
 
 

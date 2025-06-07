@@ -31,7 +31,7 @@ def read_injectable_code():
             footer = f.read()
     return header, footer
 
-async def execute_python_code(code: str, no_prints=True, max_count: int = 3) -> dict[str, Any]:
+async def execute_python_code(code: str, no_prints=True, max_count: int = 5) -> dict[str, Any]:
     if not code.strip():
         return {"success": False, "error": "No code provided", "stdout": "", "stderr": "", "json": None}
 

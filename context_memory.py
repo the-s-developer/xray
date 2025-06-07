@@ -180,7 +180,7 @@ class ContextMemoryManager:
     def refine_view(
         self,
         context_size=50000,
-        enable_trace=True,
+        enable_trace=False,
     ):
         def trace(*args):
             if enable_trace:

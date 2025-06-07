@@ -81,3 +81,7 @@ tools:
     type: stdio
     command: python
     args: ["pw_simulator/main.py"]
+  - id: frontal_cortex
+    type: stdio
+    command: python
+    args: ["frontal_cortex/main.py"]
