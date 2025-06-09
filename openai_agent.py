@@ -1,24 +1,22 @@
 from __future__ import annotations
 import json
 import time
-from typing import Any, Dict, Optional, Callable, AsyncGenerator, Union
+from typing import Any, Dict, Optional, Callable, AsyncGenerator, Union, List
 
 from openai import AsyncOpenAI
 from tool_client import ToolClient
-from context_memory import ContextMemoryManager
+from context_memory import ContextMemory
+from context_processor import ContextProcessor
 from status_enum import AgentStatus
 
 MAX_TOOL_LOOP = 10  # Maximum number of tool calls in a single ask operation
 
+def dump_messages(messages, path="messages_dump.json"):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(messages, f, indent=2, ensure_ascii=False)
 
 class OpenAIAgent:
-    """Async OpenAI agent that supports function‑calling (tool-calls) and streaming.
-
-    Güncellemeler:
-    - `finish_reason` alanı kullanılarak modelin gerçekten bittiği (user input beklediği)
-      durum güvenle tespit ediliyor.
-    - Non‑stream ve stream akışlarında "user’dan yeni komut bekleniyor" işareti dönüyor.
-    """
+    """Async OpenAI agent that supports function‑calling (tool-calls) and streaming."""
 
     def __init__(
         self,
@@ -26,16 +24,18 @@ class OpenAIAgent:
         base_url: str,
         model_id: str,
         tool_client: ToolClient,
-        memory_manager: ContextMemoryManager,
+        context_memory: ContextMemory,
         on_status_update: Optional[Callable[[dict], None]] = None,
+        context_processors: Optional[List[ContextProcessor]] = None,
     ):
         self.api_key = api_key
         self.base_url = base_url
         self.model_id = model_id
         self.tool_client = tool_client
-        self.memory_manager = memory_manager
+        self.context_memory = context_memory
         self.on_status_update = on_status_update
         self.client: Optional[AsyncOpenAI] = None
+        self.context_processors = context_processors or []
 
     # ---------------------------------------------------------------------
     # Lifecycle helpers
@@ -73,15 +73,20 @@ class OpenAIAgent:
             print("[WARN] Tool-call argümantasyon hatası:", e, "| Raw arguments:", repr(arguments))
             return {}
 
-    # Modelin gerçekten bittiğini (user input beklediğini) anlama fonksiyonu
     @staticmethod
     def _assistant_waiting(choice) -> bool:
-        """`True` dönerse model yeni içerik üretmeyecek, user’dan mesaj bekliyor."""
+        """Modelin gerçekten bittiğini (user input beklediğini) anlama fonksiyonu."""
         fr = getattr(choice, "finish_reason", None)
         message = getattr(choice, "message", None)
         no_toolcalls = not (message.tool_calls if message else False)
         no_content = not ((message.content if message else "") or "").strip()
         return fr == "stop" and (no_toolcalls or no_content)
+    
+    def _refine(self):
+        messages = self.context_memory.snapshot()
+        for processor in self.context_processors:
+            messages = processor.refine(messages)
+        return messages
 
     # ------------------------------------------------------------------
     # Public ask entrypoint
@@ -105,13 +110,13 @@ class OpenAIAgent:
             raise RuntimeError("Agent not initialized – use `async with`")
 
         await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
-        self.memory_manager.add_user_prompt(prompt)
+        self.context_memory.add_user_prompt(prompt)
         tool_defs = await self.tool_client.list_tools()
 
         loop_guard = 0
         reply = ""
 
-        messages = self.memory_manager.refine_view()
+        refined_messages = self._refine()
 
         while True:
             if loop_guard >= MAX_TOOL_LOOP:
@@ -120,7 +125,7 @@ class OpenAIAgent:
 
             resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=messages,
+                messages=refined_messages,
                 tools=tool_defs,
                 stream=False,
             )
@@ -134,10 +139,13 @@ class OpenAIAgent:
             # ----------- Asistan cevabı geldiyse -----------
             if msg.content and msg.content.strip():
                 buffer += msg.content
-                self.memory_manager.add_assistant_reply(buffer)
+                self.context_memory.add_assistant_reply(buffer)
                 reply += buffer
-                # Non-stream’de, aynı döngüde hem content hem tool-call olamaz (genelde),
-                # ama yine de döngüyü streaming ile paralel tutmak için burada kırmıyoruz.
+                await self._notify_status({
+                    "state": AgentStatus.GENERATING.value,
+                    "phase": "partial_assistant",
+                    "content": buffer,
+                })
 
             # ----------- Tool-call geldiyse -----------
             if msg.tool_calls:
@@ -145,7 +153,7 @@ class OpenAIAgent:
                     call_id = tc.id
                     name = tc.function.name
                     raw_args = tc.function.arguments or ""
-                    self.memory_manager.add_tool_calls({
+                    self.context_memory.add_tool_calls({
                         call_id: {
                             "id": call_id,
                             "type": tc.type,
@@ -159,20 +167,24 @@ class OpenAIAgent:
                         args = {}
                     try:
                         result = await self.tool_client.call_tool(call_id, name, args)
+                        await self._notify_status({
+                            "state": AgentStatus.TOOL.value,
+                            "phase": "tool_result",
+                            "call_id": call_id,
+                            "result": result,
+                        })
                     except Exception as ex:
                         result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
-                        await self._notify_status({"state": AgentStatus.ERROR.value})
+                        await self._notify_status({"state": AgentStatus.ERROR.value, "phase": "tool_error"})
 
-                    self.memory_manager.add_tool_result(
+                    self.context_memory.add_tool_result(
                         call_id,
                         result if isinstance(result, str) else json.dumps(result),
                     )
 
-            # ----- Dump memory (opsiyonel, debugging için) -----
-            with open("refined_memory_dump.json", "w") as f:
-                json.dump(self.memory_manager.refine_view(), f, indent=2, ensure_ascii=False)
-            with open("orginal_memory_dump.json", "w") as f:
-                json.dump(self.memory_manager.get_memory_snapshot(), f, indent=2, ensure_ascii=False)
+            # --- Dump memory for debugging ---
+            dump_messages(refined_messages, "refined_memory_dump.json")
+            dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
 
             # ----- Finish reason ile çıkış kararı -----
             if finish_reason == "stop":
@@ -181,11 +193,9 @@ class OpenAIAgent:
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 break
 
-            # Yeni döngü için context’i güncelle
-            messages = self.memory_manager.refine_view()
+            refined_messages = self._refine()
 
         return reply
-
 
     # ------------------------------------------------------------------
     # STREAM CHAIN
@@ -196,7 +206,7 @@ class OpenAIAgent:
             raise RuntimeError("Agent not initialized – use `async with`")
 
         await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
-        self.memory_manager.add_user_prompt(prompt)
+        self.context_memory.add_user_prompt(prompt)
 
         token_count = 0
         t0 = time.perf_counter()
@@ -204,7 +214,7 @@ class OpenAIAgent:
 
         from collections import defaultdict
         loop_guard = 0
-        messages = self.memory_manager.refine_view()
+        refined_messages = self._refine()
         while True:
             if loop_guard >= MAX_TOOL_LOOP:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
@@ -212,20 +222,18 @@ class OpenAIAgent:
 
             tool_defs = await self.tool_client.list_tools()
             buffer: str = ""
-            tool_call_happened = False
             tool_parts: Dict[int, Dict[str, Any]] = defaultdict(
                 lambda: {"id": None, "type": None, "name": None, "arguments": ""}
             )
             finish_reason: Optional[str] = None
 
-                
             stream_resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=messages,
+                messages=refined_messages,
                 tools=tool_defs,
                 stream=True,
             )
-            tool_calls=[]
+            tool_calls = []
             async for chunk in stream_resp:
                 delta = chunk.choices[0].delta
                 if delta.content:
@@ -237,12 +245,9 @@ class OpenAIAgent:
                         "tps": tps(),
                     })
 
-                # stream API: finish_reason yalnızca son chunk’ta gelir
                 if chunk.choices[0].finish_reason is not None:
                     finish_reason = chunk.choices[0].finish_reason
-                    print(f"!!!!!!!!!!!!!!!!!!!!!!!{finish_reason}!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-                # ------------- tool‑call parçalama -------------
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         p = tool_parts[tc.index]
@@ -266,7 +271,6 @@ class OpenAIAgent:
                             except json.JSONDecodeError:
                                 args_dict = {}
                             call_id = p["id"]
-                            
                             tool_calls.append({
                                 call_id: {
                                     "id": call_id,
@@ -277,22 +281,20 @@ class OpenAIAgent:
                             })
                             del tool_parts[tc.index]
 
-            # ------------- döngü sonu karar -------------
             if buffer.strip():
-                # asistan en az bir content döndürdü
-                self.memory_manager.add_assistant_reply(buffer)
+                self.context_memory.add_assistant_reply(buffer)
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 yield json.dumps({"type": "end", "tps": tps()})
-            
+
             for tool_call in tool_calls:
-                self.memory_manager.add_tool_calls(tool_call)
+                self.context_memory.add_tool_calls(tool_call)
                 try:
                     result = await self.tool_client.call_tool(call_id, p["name"], args_dict)
                 except Exception as ex:
                     result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
                     await self._notify_status({"state": AgentStatus.ERROR.value})
 
-                self.memory_manager.add_tool_result(
+                self.context_memory.add_tool_result(
                     call_id,
                     result if isinstance(result, str) else json.dumps(result),
                 )
@@ -302,12 +304,10 @@ class OpenAIAgent:
                     "result": result,
                     "tps": tps(),
                 })
-            
-            messages = self.memory_manager.refine_view()
-            with open("refined_memory_dump.json", "w") as f:
-                json.dump(messages, f, indent=2, ensure_ascii=False)
-            with open("orginal_memory_dump.json", "w") as f:
-                json.dump(self.memory_manager.get_memory_snapshot(), f, indent=2, ensure_ascii=False)
+
+            refined_messages = self._refine()
+            dump_messages(refined_messages, "refined_memory_dump.json")
+            dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
 
             if finish_reason == "stop":
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
@@ -317,9 +317,6 @@ class OpenAIAgent:
                     "tps": tps(),
                 })
                 break
-        
-        with open("refined_memory_dump.json", "w") as f:
-            json.dump(messages, f, indent=2, ensure_ascii=False)
-    
-        with open("orginal_memory_dump.json", "w") as f:
-            json.dump(self.memory_manager.get_memory_snapshot(), f, indent=2, ensure_ascii=False)
+
+        dump_messages(refined_messages, "refined_memory_dump.json")
+        dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")

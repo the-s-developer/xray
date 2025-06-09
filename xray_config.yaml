@@ -49,26 +49,26 @@ models:
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
 
-  # Ollama ve diğer local modelleri de ekleyebilirsin:
-  - id: qwen3:14b-q8_0
-    label: qwen3:14b-q8_0 (ollama)
-    base_url: http://localhost:11434/v1
-    api_key: "no_key"
-  - id: qwen3:8b
-    label: qwen3 8b (ollama)
-    base_url: http://localhost:11434/v1
-    api_key: "no_key"
-  - id: devstral:24b-small-2505-q8_0
-    label: mistral devstral:24b-small-2505-q8_0 (ollama)
+
+  - id:  qwen3:14b
+    label:  qwen3:14b (ollama)
     base_url: http://localhost:11434/v1
     api_key: "no_key"
   - id: devstral:24b
-    label: mistral devstral:24b Q4_K_M (ollama)
+    label: mistral devstral:24b (ollama)
     base_url: http://localhost:11434/v1
     api_key: "no_key"
-  - id: myaniu/qwen2.5-1m:14b-instruct-q6_K_M
-    label: myaniu/qwen2.5-1m:14b-instruct-q6_K_M (ollama)
+  - id: cogito:32b
+    label: cogito:32b (ollama)
     base_url: http://localhost:11434/v1
+    api_key: "no_key"
+  - id: qwen2.5:32b
+    label: qwen2.5:32b (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: "no_key"
+  - id: /root/.cache/llama.cpp/Qwen_Qwen3-32B-GGUF_Qwen3-14B-Q4_K_M.gguf
+    label: Qwen_Qwen3-14B-GGUF_Qwen3-14B-Q4_K_M.gguf llamacpp
+    base_url: http://192.168.99.96:8000/v1
     api_key: "no_key"
 
 # === TOOLS ===
@@ -81,7 +81,11 @@ tools:
     type: stdio
     command: python
     args: ["pw_simulator/main.py"]
-  - id: frontal_cortex
-    type: stdio
-    command: python
-    args: ["frontal_cortex/main.py"]
+  # - id: longterm_memory
+  #   type: stdio
+  #   command: python
+  #   args: ["longterm_memory/main.py"]
+  # - id: temporal_memory
+  #   type: stdio
+  #   command: python
+  #   args: ["temporal_memory/main.py"]

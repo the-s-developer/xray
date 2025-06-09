@@ -42,7 +42,6 @@ def get_model_config(model_id, models):
     models parametresi bir liste (dict değil!).
     """
     import json
-    print("----------------------------------------------",json.dumps(models, indent=2, ensure_ascii=False))
     for m in models:
         if m["id"] == model_id:
             return m

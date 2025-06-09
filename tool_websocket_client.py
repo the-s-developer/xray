@@ -103,7 +103,6 @@ class ToolWebSocketClient(ToolClient):
         if name in self.dynamic_tools:
             print(f"Tool '{name}' already registered, skipping.")
             return        
-        print(f"--------------------Registering tool: name={name}, description={description}, parameters={parameters}")
         # 1. Tool name collision
         if not isinstance(name, str) or not name.strip():
             raise ValueError("Tool 'name' must be a non-empty string.")

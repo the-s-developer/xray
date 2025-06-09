@@ -133,6 +133,7 @@ class SemanticMemory:
         if before:
             filter_clauses.append(f"timestamp <= '{before}'")
         filter_str = " and ".join(filter_clauses) if filter_clauses else None
+
         hits = self.client.search(
             collection_name=self.collection,
             data=[vector],
@@ -140,7 +141,12 @@ class SemanticMemory:
             output_fields=["key", "content", "timestamp"],
             filter=filter_str,
         )
+        
         results: List[Dict[str, Any]] = []
+        if not hits or not hits[0]:
+            results.append({})
+            return results
+
         for hit in hits[0]:
             results.append({
                 "key": hit.entity.get("key"),
@@ -149,6 +155,7 @@ class SemanticMemory:
                 "COSINE": float(hit.distance),
             })
         return results
+
 
     def forget(self, key: str) -> bool:
         res = self.client.delete(
