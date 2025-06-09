@@ -51,42 +51,82 @@ async def broadcast_ws_event(event_data):
         except Exception:
             closed.add(ws)
     ws_clients.difference_update(closed)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+    
+async def reset_app_state(app):
     config = load_xray_config()
     mongo_uri, db_name = get_db_config(config)
-    app.state.db = get_db(mongo_uri, db_name)     
+    app.state.db = get_db(mongo_uri, db_name)
     models = config.get("models", [])
     tools = config.get("tools", [])
     tool_clients = [build_tool_from_config(t) for t in tools]
-    
-    # --- context_processors ile tool client eklemesi ---
+
+    # Context Processors
     context_processors = []
     for proc_class in [TemporalMemory, ChainOfThought]:
         proc = proc_class()
         context_processors.append(proc)
-        # Eğer processor'ın create_tool_client metodu varsa ve döndürüyorsa ekle
         if hasattr(proc, "create_tool_client"):
             tc = proc.create_tool_client()
             if tc:
                 tool_clients.append(tc)
-    app.state.context_processors=context_processors
-    # ---------------------------------------------------
-    
+    app.state.context_processors = context_processors
+
     app.state.xray_models = models
     app.state.xray_tools = tools
+
+    # Eski router varsa kapat (temizlik)
+    if hasattr(app.state, "router"):
+        await app.state.router.__aexit__(None, None, None)
+
     setup_all(app, tool_clients=tool_clients)
-    # Context memory + context_processors
+
+    # Context memory + observer
     app.state.memory = ContextMemory(system_prompt="You are a helpful assistant.")
     app.state.memory.add_observer(lambda snap: asyncio.create_task(
         broadcast_ws_event({"event": "memory_update", "data": snap})
-    ))   
+    ))
+
+    # Tool websocket client & router
     app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
     app.state.router = ToolRouter([*tool_clients, app.state.ui_tool_client])
     await app.state.router.__aenter__()
-    yield
-    await app.state.router.__aexit__(None, None, None)
+
+
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await reset_app_state(app)  # --- Tüm state'i baştan kurar ---
+
+    try:
+        yield
+    finally:
+        # Router'ı temizle
+        if hasattr(app.state, "router"):
+            try:
+                await app.state.router.__aexit__(None, None, None)
+            except Exception:
+                pass  # Hata loglamak istersen buraya ekleyebilirsin
+
+        # DB bağlantısı temizliği (eğer gerekiyorsa)
+        if hasattr(app.state, "db"):
+            db = app.state.db
+            if hasattr(db, "close") and callable(db.close):
+                try:
+                    await db.close()
+                except Exception:
+                    pass  # Buraya log eklenebilir
+
+        # Context processors için özel cleanup gerekiyorsa:
+        if hasattr(app.state, "context_processors"):
+            for proc in app.state.context_processors:
+                if hasattr(proc, "shutdown") and callable(proc.shutdown):
+                    try:
+                        await proc.shutdown()
+                    except Exception:
+                        pass  # Buraya log eklenebilir
+
 
 
 app = FastAPI(lifespan=lifespan)
@@ -327,12 +367,13 @@ async def bulk_delete(request: Request):
 
 @app.post("/api/chat/reset")
 async def reset_state():
-    old_observers = list(getattr(app.state.memory, "_observers", []))
-    app.state.memory = ContextMemory(system_prompt="You are a helpful assistant.")
-    for cb in old_observers:
-        app.state.memory.add_observer(cb)
-    app.state.memory._notify_observers()
-    return {"status": "ok", "message": "Context/memory resetlendi."}
+    await reset_app_state(app)
+    await broadcast_ws_event({
+        "event": "memory_update",
+        "data": {"messages": app.state.memory.snapshot()}
+    })
+    return {"status": "ok", "message": "Tüm state sıfırlandı."}
+
 
 @app.post("/api/chat/restart")
 async def restart_backend():
@@ -345,6 +386,7 @@ async def restart_backend():
     app.state.memory = ContextMemory(system_prompt="You are a helpful assistant.")
     for cb in old_observers:
         app.state.memory.add_observer(cb)
+    
     app.state.memory._notify_observers()
     await broadcast_ws_event({
         "event": "memory_update",
