@@ -7,8 +7,8 @@ import logging
 import time
 
 INSTRUCTION_PROMPT="""
-Rules:
-- if there is summerized [temporal-memory_recall(key)] text,content what is over 4096 character is always trimmed,use temporal recall with key to get full data
+**Rule:**
+If a tool response exceeds 4096 characters, it will be trimmed and marked with `[temporal-memory_recall([key])]`. Use the key to retrieve the full content.
 """
 
 class TemporalMemory(ContextMemory):
@@ -40,7 +40,7 @@ class TemporalMemory(ContextMemory):
         if len(content) > MAX_SIZE:
             key = f"{tool_call_id}"
             self.temporal_data[key] = content
-            summary = content[:256] + f"\n\n---\\n ...summarized!\n full data is saved to [temporal_memory_key: {key}]"
+            summary = content[:256] + f"\n\n[...trimmed, call temporal-memory_recall({key})]"
             super().add_tool_result(tool_call_id, summary)
         else:
             super().add_tool_result(tool_call_id, content)
