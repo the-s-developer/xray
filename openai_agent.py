@@ -108,8 +108,6 @@ class OpenAIAgent:
         loop_guard = 0
         reply = ""
 
-        refined_messages = self.context_memory.refine()
-
         while True:
             if loop_guard >= MAX_TOOL_LOOP:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
@@ -117,7 +115,7 @@ class OpenAIAgent:
 
             resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=refined_messages,
+                messages=self.context_memory.snapshot(),
                 tools=tool_defs,
                 stream=False,
             )
@@ -174,9 +172,7 @@ class OpenAIAgent:
                         result if isinstance(result, str) else json.dumps(result),
                     )
 
-            # --- Dump memory for debugging ---
-            dump_messages(refined_messages, "refined_memory_dump.json")
-            dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
+            dump_messages(self.context_memory.snapshot(), "memory_dump.json")
 
             # ----- Finish reason ile çıkış kararı -----
             if finish_reason == "stop":
@@ -185,7 +181,6 @@ class OpenAIAgent:
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 break
 
-            refined_messages = self.context_memory.refine()
 
         return reply
 
@@ -206,7 +201,6 @@ class OpenAIAgent:
 
         from collections import defaultdict
         loop_guard = 0
-        refined_messages = self.context_memory.refine()
         while True:
             if loop_guard >= MAX_TOOL_LOOP:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
@@ -221,7 +215,7 @@ class OpenAIAgent:
 
             stream_resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=refined_messages,
+                messages=self.context_memory.snapshot(),
                 tools=tool_defs,
                 stream=True,
             )
@@ -264,13 +258,12 @@ class OpenAIAgent:
                                 args_dict = {}
                             call_id = p["id"]
                             tool_calls.append({
-                                call_id: {
                                     "id": call_id,
                                     "type": p["type"],
                                     "name": p["name"],
                                     "arguments": p["arguments"],
                                 }
-                            })
+                            )
                             del tool_parts[tc.index]
 
             if buffer.strip():
@@ -286,10 +279,7 @@ class OpenAIAgent:
                     result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
                     await self._notify_status({"state": AgentStatus.ERROR.value})
 
-                self.context_memory.add_tool_result(
-                    call_id,
-                    result if isinstance(result, str) else json.dumps(result),
-                )
+                self.context_memory.add_tool_result(call_id,result if isinstance(result, str) else json.dumps(result),meta=tool_call)
                 yield json.dumps({
                     "type": "tool_result",
                     "call_id": call_id,
@@ -297,9 +287,7 @@ class OpenAIAgent:
                     "tps": tps(),
                 })
 
-            refined_messages = self.context_memory.refine()
-            dump_messages(refined_messages, "refined_memory_dump.json")
-            dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
+            dump_messages(self.context_memory.snapshot(), "memory_dump.json")
 
             if finish_reason == "stop":
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
@@ -310,5 +298,4 @@ class OpenAIAgent:
                 })
                 break
 
-        dump_messages(refined_messages, "refined_memory_dump.json")
-        dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
+        dump_messages(self.context_memory.snapshot(), "memory_dump.json")

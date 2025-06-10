@@ -71,15 +71,13 @@ class ContextMemory:
 
     def add_user_prompt(self, content: str) -> None:
         msg = ensure_meta({"role": "user", "content": content})
-        self.__messages.append(msg)
-        self.notify_observers()
+        self.add_message(msg)
 
     def add_assistant_reply(self, content: str) -> None:
         msg = ensure_meta({"role": "assistant", "content": content.strip()})
-        self.__messages.append(msg)
-        self.notify_observers()
+        self.add_message(msg)
 
-    def add_tool_calls(self, partial_calls: Dict[str, Dict[str, Any]]) -> None:
+    def add_tool_calls(self, call: Dict[str, Any]) -> None:
         tool_calls = [
             {
                 "type": call["type"],
@@ -89,25 +87,21 @@ class ContextMemory:
                     "arguments": call["arguments"],
                 },
             }
-            for call in partial_calls.values()
         ]
         msg = ensure_meta({
             "role": "assistant",
             "content": None,
             "tool_calls": tool_calls,
         })
-        self.__messages.append(msg)
-        self.notify_observers()
+        self.add_message(msg)
 
-    def add_tool_result(self, tool_call_id: str, content: str) -> None:
+    def add_tool_result(self, tool_call_id: str, content: str,meta=None) -> None:
         msg = ensure_meta({
             "role": "tool",
             "tool_call_id": tool_call_id,
             "content": content.strip(),
         })
-        self.__messages.append(msg)
-        self.notify_observers()
-
+        self.add_message(msg)
     # --- Find and update/delete methods ---
 
     def find_message(self, msg_id: str) -> Optional[Dict[str, Any]]:
@@ -115,7 +109,7 @@ class ContextMemory:
             if m.get("meta", {}).get("id") == msg_id:
                 return m
         return None
-
+    
     def update_content(self, msg_id: str, new_content: str) -> bool:
         for msg in self.__messages:
             if msg.get("meta", {}).get("id") == msg_id:
@@ -182,60 +176,3 @@ class ContextMemory:
             self.__messages = new_messages
             self.notify_observers()
         return deleted_count
-
-    def refine(self,with_id=True) -> List[Dict[str, Any]]:
-        messages = self.snapshot()
-
-        system_msg: Optional[Dict[str, Any]] = None
-        for m in reversed(messages):
-            if m.get("role") == "system":
-                system_msg = m
-                break
-
-        user_msgs: List[Dict[str, Any]] = [m for m in messages if m.get("role") == "user"]
-
-        assistant_plain: List[Dict[str, Any]] = [
-            m for m in messages if m.get("role") == "assistant" and not m.get("tool_calls")
-        ]
-
-        last_user_idx: Optional[int] = None
-        for idx in range(len(messages) - 1, -1, -1):
-            if messages[idx].get("role") == "user":
-                last_user_idx = idx
-                break
-
-        tool_section: List[Dict[str, Any]] = []
-        if last_user_idx is not None:
-            i = last_user_idx + 1
-            while i < len(messages):
-                current = messages[i]
-                if current.get("role") == "assistant" and current.get("tool_calls"):
-                    tool_section.append(current)
-                    call_ids = {call["id"] for call in current["tool_calls"]}
-                    j = i + 1
-                    while j < len(messages):
-                        maybe_tool = messages[j]
-                        if maybe_tool.get("role") in {"user", "assistant"} and not maybe_tool.get("role") == "tool":
-                            break
-                        if maybe_tool.get("role") == "tool" and maybe_tool.get("tool_call_id") in call_ids:
-                            tool_section.append(maybe_tool)
-                        j += 1
-                    i = j
-                else:
-                    i += 1
-
-        result: List[Dict[str, Any]] = []
-        if system_msg:
-            result.append(system_msg)
-        result.extend(user_msgs)
-        result.extend(assistant_plain)
-        result.extend(tool_section)
-
-        result.sort(key=lambda m: m.get("meta", {}).get("created_at", 0))
-
-        if with_id:
-            for m in result:
-                if m.get("content") and m.get("meta", {}).get("id") and m.get("role") in ["asistan", "tool"]:
-                    m["content"] += f" [#msgid:{m['meta']['id']}]"
-
-        return result
