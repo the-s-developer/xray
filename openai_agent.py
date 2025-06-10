@@ -1,12 +1,11 @@
 from __future__ import annotations
 import json
 import time
-from typing import Any, Dict, Optional, Callable, AsyncGenerator, Union, List
+from typing import Any, Dict, Optional, Callable, AsyncGenerator, Union
 
 from openai import AsyncOpenAI
 from tool_client import ToolClient
 from context_memory import ContextMemory
-from context_processor import ContextProcessor
 from status_enum import AgentStatus
 
 MAX_TOOL_LOOP = 10  # Maximum number of tool calls in a single ask operation
@@ -16,7 +15,7 @@ def dump_messages(messages, path="messages_dump.json"):
         json.dump(messages, f, indent=2, ensure_ascii=False)
 
 class OpenAIAgent:
-    """Async OpenAI agent that supports function‑calling (tool-calls) and streaming."""
+    """Async OpenAI agent that supports function-calling (tool-calls) and streaming."""
 
     def __init__(
         self,
@@ -26,7 +25,6 @@ class OpenAIAgent:
         tool_client: ToolClient,
         context_memory: ContextMemory,
         on_status_update: Optional[Callable[[dict], None]] = None,
-        context_processors: Optional[List[ContextProcessor]] = None,
     ):
         self.api_key = api_key
         self.base_url = base_url
@@ -35,7 +33,6 @@ class OpenAIAgent:
         self.context_memory = context_memory
         self.on_status_update = on_status_update
         self.client: Optional[AsyncOpenAI] = None
-        self.context_processors = context_processors or []
 
     # ---------------------------------------------------------------------
     # Lifecycle helpers
@@ -82,11 +79,6 @@ class OpenAIAgent:
         no_content = not ((message.content if message else "") or "").strip()
         return fr == "stop" and (no_toolcalls or no_content)
     
-    def _refine(self):
-        messages = self.context_memory.snapshot()
-        for processor in self.context_processors:
-            messages = processor.refine(messages)
-        return messages
 
     # ------------------------------------------------------------------
     # Public ask entrypoint
@@ -102,7 +94,7 @@ class OpenAIAgent:
         return await self.ask_chain_non_stream(prompt)
 
     # ------------------------------------------------------------------
-    # NON‑STREAM CHAIN
+    # NON-STREAM CHAIN
     # ------------------------------------------------------------------
 
     async def ask_chain_non_stream(self, prompt: str) -> str:
@@ -116,7 +108,7 @@ class OpenAIAgent:
         loop_guard = 0
         reply = ""
 
-        refined_messages = self._refine()
+        refined_messages = self.context_memory.refine()
 
         while True:
             if loop_guard >= MAX_TOOL_LOOP:
@@ -193,7 +185,7 @@ class OpenAIAgent:
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 break
 
-            refined_messages = self._refine()
+            refined_messages = self.context_memory.refine()
 
         return reply
 
@@ -214,7 +206,7 @@ class OpenAIAgent:
 
         from collections import defaultdict
         loop_guard = 0
-        refined_messages = self._refine()
+        refined_messages = self.context_memory.refine()
         while True:
             if loop_guard >= MAX_TOOL_LOOP:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
@@ -305,7 +297,7 @@ class OpenAIAgent:
                     "tps": tps(),
                 })
 
-            refined_messages = self._refine()
+            refined_messages = self.context_memory.refine()
             dump_messages(refined_messages, "refined_memory_dump.json")
             dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
 

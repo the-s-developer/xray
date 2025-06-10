@@ -77,7 +77,7 @@ tools:
     type: stdio
     command: npx
     args: ["-y", "@playwright/mcp@latest"]
-  - id: simulator
+  - id: python-environment
     type: stdio
     command: python
     args: ["pw_simulator/main.py"]

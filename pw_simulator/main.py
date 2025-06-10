@@ -5,29 +5,20 @@ load_dotenv()
 
 
 
-mcp = FastMCP("pw_simulator")
+mcp = FastMCP("python_environment")
 @mcp.tool(
-    name="execute_python_scraper_code",
+    name="execute",
     description=(
         "Executes a Python code string in the python environment. "
+        "Uses Python 3.11. "
         "The environment has Playwright, BeautifulSoup (bs4), and httpx, requests, pre-installed and ready to use. "
-        "Define a `RESULT` dictionary in your code, and it will be automatically returned as a JSON result. "
-        "Do not need to import or define any extra function; simply assign your result to `RESULT`. "
+        "Define a `OUTPUT` dictionary in your code, and it will be automatically returned as a result. "
         "**Important:** Do not use a main function or `if __name__ == '__main__':` block in your script. "
-        "Example Code:"
-        "```python\n"
-        "#MAX_COUNT = ...  (will be injected)\n"
-        "RESULT=[] #will be returned as json data"
-        "for i, item in enumerate(...):\n"
-        "    if i >= MAX_COUNT:\n"
-        "        break\n"
-        "```\n"
     )
 
 )
-async def execute_python_scraper_code(code: str):
-    result = await execute_python_code(code, no_prints=False)
-    return result
+async def execute(python_code: str):
+    return  await execute_python_code(python_code, no_prints=False)
 
 
 if __name__ == "__main__":

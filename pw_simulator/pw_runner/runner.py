@@ -70,10 +70,10 @@ async def execute_python_code(code: str, no_prints=True, max_count: int = 5) -> 
 
             result={}
             if data is not None:
-                 result["result"]= data
+                 result["output"]= data
 
             if no_prints==False:
-                result["logs"]= logs
+                result["prints"]= logs
             
             return result
 
