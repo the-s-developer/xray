@@ -2,22 +2,17 @@
 from typing import Any, Dict, List, Callable
 from tool_client import ToolClient
 import inspect
-from typing import get_type_hints
-import inspect
+from typing import get_type_hints, get_origin, get_args, Union
 import asyncio
-
-
-from typing import get_origin, get_args, Union
-import inspect
+import re
 
 def type_to_schema(param_type):
     origin = get_origin(param_type)
     args = get_args(param_type)
-    # Optional (Union[..., None]) tespiti
+    # Detect Optional (Union[..., None])
     if origin is Union and type(None) in args:
         non_none = [a for a in args if a is not type(None)][0]
         s = type_to_schema(non_none)
-        # OpenAI uyumlu: ["string", "null"]
         if "type" in s:
             s["type"] = [s["type"], "null"]
         return s
@@ -35,7 +30,19 @@ def type_to_schema(param_type):
     if origin is dict or origin is Dict:
         val_type = args[1] if len(args) > 1 else str
         return {"type": "object", "additionalProperties": type_to_schema(val_type)}
-    return {"type": "string"} # fallback
+    return {"type": "string"}  # fallback
+
+def parse_param_descriptions_from_docstring(docstring: str):
+    """
+    Simple Google-style docstring parser: extracts param descriptions from the Args: section.
+    """
+    descs = {}
+    if not docstring:
+        return descs
+    matches = re.findall(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]+\))?:\s*([^\n]+)', docstring, re.MULTILINE)
+    for param, desc in matches:
+        descs[param] = desc.strip()
+    return descs
 
 def python_function_to_json_schema(fn, description=None, doc_comments=None):
     sig = inspect.signature(fn)
@@ -43,14 +50,12 @@ def python_function_to_json_schema(fn, description=None, doc_comments=None):
     required = []
     props = {}
 
-    doc_dict = doc_comments or {}
     docstring = (fn.__doc__ or "").strip()
+    doc_dict = doc_comments or parse_param_descriptions_from_docstring(docstring)
     tool_description = description or docstring or fn.__name__
 
     for name, param in sig.parameters.items():
         param_type = hints.get(name, str)
-        # Optional tespiti için yukarıdaki fonksiyon zaten tip olarak ["string", "null"] vs. döndürür
-        # Sadece default'u None ise required'a ekleme
         if param.default is inspect.Parameter.empty:
             required.append(name)
         prop_schema = type_to_schema(param_type)
@@ -67,7 +72,6 @@ def python_function_to_json_schema(fn, description=None, doc_comments=None):
         "required": required,
         "additionalProperties": False,
     }
-    # Yeni OpenAI formatında:
     function_def = {
         "type": "function",
         "function": {
@@ -81,7 +85,7 @@ def python_function_to_json_schema(fn, description=None, doc_comments=None):
 
 class ToolLocalClient(ToolClient):
     """
-    Lokal Python fonksiyonlarını OpenAI-compatible 'tool' olarak expose eden client.
+    Exposes local Python functions as OpenAI-compatible 'tools'.
     """
 
     def __init__(self, server_id: str = "local"):
@@ -114,30 +118,20 @@ class ToolLocalClient(ToolClient):
         else:
             return fn(**args)
 
-
-# ÖRNEK KULLANIM (test)
+# SAMPLE USAGE (test)
 if __name__ == "__main__":
     import asyncio
 
     def add_numbers(a: int, b: int) -> int:
+        """
+        a: First number to add.
+        b: Second number to add.
+        """
         return a + b
-
-    parameters = {
-        "type": "object",
-        "properties": {
-            "a": {"type": "integer", "description": "First number"},
-            "b": {"type": "integer", "description": "Second number"},
-        },
-        "required": ["a", "b"],
-    }
 
     async def test():
         client = ToolLocalClient()
-        client.register_tool(
-            "add_numbers", add_numbers,
-            description="Adds two numbers.",
-            parameters=parameters
-        )
+        client.register_tool_auto(add_numbers)
 
         tools = await client.list_tools()
         print("TOOL DEFINITIONS:", tools)

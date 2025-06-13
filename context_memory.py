@@ -55,12 +55,18 @@ class ContextMemory:
         self.__messages = [m for m in self.__messages if keep_system and m["role"] == "system"]
         self.notify_observers()
 
-    def add_message(self, msg: Dict[str, Any]) -> None:
+    def add_message(self, msg: Dict[str, Any], meta=None) -> Any:
         if msg.get("role") == "system":
             # Enforce using set_system_prompt for system messages
             return
-        self.__messages.append(ensure_meta(msg.copy()))
+        new_msg = ensure_meta(msg.copy())
+        if meta:
+            # Merge meta, with meta argument taking precedence
+            merged_meta = {**new_msg.get("meta", {}), **meta}
+            new_msg["meta"] = merged_meta
+        self.__messages.append(new_msg)
         self.notify_observers()
+        return new_msg["meta"]["id"]
 
     # Convenience methods for adding typed messages
     def set_system_prompt(self, content: str) -> None:
@@ -70,47 +76,52 @@ class ContextMemory:
         self.notify_observers()
 
     def add_user_prompt(self, content: str) -> None:
-        msg = ensure_meta({"role": "user", "content": content})
-        self.__messages.append(msg)
+        id=self.add_message({"role": "user", "content": content})
         self.notify_observers()
+        return id
 
-    def add_assistant_reply(self, content: str) -> None:
-        msg = ensure_meta({"role": "assistant", "content": content.strip()})
-        self.__messages.append(msg)
+
+    def add_assistant_reply(self,content: Optional[str],tool_calls_with_result: Optional[List[Dict[str, Any]]]=None) -> None:
+        assistan_reply={
+            "role": "assistant"
+        }
+        tool_responses=[]
+        
+        if tool_calls_with_result:
+            tool_calls = [
+                {
+                    "type": call["type"],
+                    "id": call["id"],
+                    "function": {
+                        "name": call["name"],
+                        "arguments": call["arguments"],
+                    },
+                }  for call in tool_calls_with_result
+            ]
+            assistan_reply["tool_calls"]=tool_calls
+            import json
+            for call in tool_calls_with_result:
+                tool_responses.append({
+                    "role": "tool",
+                    "tool_call_id":call["id"],
+                    "content": call["result"],
+                })
+
+        if len(tool_responses)>0:
+            assistan_reply["tool_calls"]=tool_calls
+            for tr in tool_responses:
+                assistant_id=self.add_message(assistan_reply)
+                self.add_message(tr,meta={"assistant_id":assistant_id})
+        elif content:    
+             assistan_reply["content"]=content
+             assistant_id=self.add_message(assistan_reply)
+        else:
+            raise ValueError("")
+        
         self.notify_observers()
+        
 
-    def add_tool_calls(self, partial_calls: Dict[str, Dict[str, Any]]) -> None:
-        tool_calls = [
-            {
-                "type": call["type"],
-                "id": call["id"],
-                "function": {
-                    "name": call["name"],
-                    "arguments": call["arguments"],
-                },
-            }
-            for call in partial_calls.values()
-        ]
-        msg = ensure_meta({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": tool_calls,
-        })
-        self.__messages.append(msg)
-        self.notify_observers()
-
-    def add_tool_result(self, tool_call_id: str, content: str) -> None:
-        msg = ensure_meta({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": content.strip(),
-        })
-        self.__messages.append(msg)
-        self.notify_observers()
-
-    # --- Find and update/delete methods ---
-
-    def find_message(self, msg_id: str) -> Optional[Dict[str, Any]]:
+    def get_message(self, msg_id: str) -> Optional[Dict[str, Any]]:
         for m in self.__messages:
             if m.get("meta", {}).get("id") == msg_id:
                 return m
@@ -147,12 +158,6 @@ class ContextMemory:
         return True
     
     def delete(self, ids: List[str]) -> int:
-        """
-        Verilen mesaj ID listesine göre mesajları siler.
-        System mesajları silinmez.
-        User mesajı silinirse, ona bağlı assistant ve tool mesajları da silinir.
-        Silinen mesaj sayısını döner.
-        """
         protected_ids = {m["meta"]["id"] for m in self.__messages if m["role"] == "system"}
         ids_to_delete = set(ids) - protected_ids
 
@@ -183,59 +188,5 @@ class ContextMemory:
             self.notify_observers()
         return deleted_count
 
-    def refine(self,with_id=True) -> List[Dict[str, Any]]:
-        messages = self.snapshot()
-
-        system_msg: Optional[Dict[str, Any]] = None
-        for m in reversed(messages):
-            if m.get("role") == "system":
-                system_msg = m
-                break
-
-        user_msgs: List[Dict[str, Any]] = [m for m in messages if m.get("role") == "user"]
-
-        assistant_plain: List[Dict[str, Any]] = [
-            m for m in messages if m.get("role") == "assistant" and not m.get("tool_calls")
-        ]
-
-        last_user_idx: Optional[int] = None
-        for idx in range(len(messages) - 1, -1, -1):
-            if messages[idx].get("role") == "user":
-                last_user_idx = idx
-                break
-
-        tool_section: List[Dict[str, Any]] = []
-        if last_user_idx is not None:
-            i = last_user_idx + 1
-            while i < len(messages):
-                current = messages[i]
-                if current.get("role") == "assistant" and current.get("tool_calls"):
-                    tool_section.append(current)
-                    call_ids = {call["id"] for call in current["tool_calls"]}
-                    j = i + 1
-                    while j < len(messages):
-                        maybe_tool = messages[j]
-                        if maybe_tool.get("role") in {"user", "assistant"} and not maybe_tool.get("role") == "tool":
-                            break
-                        if maybe_tool.get("role") == "tool" and maybe_tool.get("tool_call_id") in call_ids:
-                            tool_section.append(maybe_tool)
-                        j += 1
-                    i = j
-                else:
-                    i += 1
-
-        result: List[Dict[str, Any]] = []
-        if system_msg:
-            result.append(system_msg)
-        result.extend(user_msgs)
-        result.extend(assistant_plain)
-        result.extend(tool_section)
-
-        result.sort(key=lambda m: m.get("meta", {}).get("created_at", 0))
-
-        if with_id:
-            for m in result:
-                if m.get("content") and m.get("meta", {}).get("id") and m.get("role") in ["asistan", "tool"]:
-                    m["content"] += f" [#msgid:{m['meta']['id']}]"
-
-        return result
+    def refine(self) -> List[Dict[str, Any]]:
+        return self.snapshot()

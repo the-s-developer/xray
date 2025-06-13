@@ -80,7 +80,7 @@ class OpenAIAgent:
         return fr == "stop" and (no_toolcalls or no_content)
     
     def dump(self):
-        dump_messages(self.context_memory.refine(), "refined_memory_dump.json")
+        dump_messages(self.context_memory.refine(with_id=True), "refined_memory_dump.json")
         dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
     # ------------------------------------------------------------------
     # Public ask entrypoint
@@ -98,7 +98,6 @@ class OpenAIAgent:
     # ------------------------------------------------------------------
     # NON-STREAM CHAIN
     # ------------------------------------------------------------------
-
     async def ask_chain_non_stream(self, prompt: str) -> str:
         if self.client is None:
             raise RuntimeError("Agent not initialized – use `async with`")
@@ -117,7 +116,7 @@ class OpenAIAgent:
 
             resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.refine(),
+                messages=self.context_memory.refine(with_id=True),
                 tools=tool_defs,
                 stream=False,
             )
@@ -127,11 +126,11 @@ class OpenAIAgent:
 
             buffer = ""
             tool_calls = []
+            tool_calls_with_result = []
 
             # ----------- Asistan cevabı geldiyse -----------
             if msg.content and msg.content.strip():
                 buffer += msg.content
-                self.context_memory.add_assistant_reply(buffer)
                 reply += buffer
                 await self._notify_status({
                     "state": AgentStatus.GENERATING.value,
@@ -145,18 +144,13 @@ class OpenAIAgent:
                     call_id = tc.id
                     name = tc.function.name
                     raw_args = tc.function.arguments or ""
-                    self.context_memory.add_tool_calls({
-                        call_id: {
-                            "id": call_id,
-                            "type": tc.type,
-                            "name": name,
-                            "arguments": raw_args,
-                        }
-                    })
+                    # Tool çağrısını context'e eklemeye gerek yok, topluca ekleyeceğiz
                     try:
                         args = json.loads(raw_args) if raw_args else {}
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
+                        print(str(e))
                         args = {}
+
                     try:
                         result = await self.tool_client.call_tool(call_id, name, args)
                         await self._notify_status({
@@ -166,13 +160,27 @@ class OpenAIAgent:
                             "result": result,
                         })
                     except Exception as ex:
-                        result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
+                        result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)}, indent=2)
+                        print(result)
                         await self._notify_status({"state": AgentStatus.ERROR.value, "phase": "tool_error"})
 
-                    self.context_memory.add_tool_result(
-                        call_id,
-                        result if isinstance(result, str) else json.dumps(result),
-                    )
+                    tool_calls_with_result.append({
+                        "id": call_id,
+                        "type": tc.type,
+                        "name": name,
+                        "arguments": raw_args,
+                        "result": result if isinstance(result, str) else json.dumps(result),
+                    })
+
+            # --- Cevap ve/veya tool-calls context'e topluca ekleniyor ---
+            if tool_calls_with_result:
+                # buffer boşsa content None gönderebilirsin, streaming'de olduğu gibi
+                self.context_memory.add_assistant_reply(buffer if buffer else None, tool_calls_with_result)
+            elif buffer.strip():
+                self.context_memory.add_assistant_reply(buffer)
+            else:
+                # Asistan ne cevap ne de tool call verdi, döngüyü kır
+                break
 
             self.dump()
 
@@ -182,7 +190,9 @@ class OpenAIAgent:
                     reply += "\n(Soru tamamlandı, lütfen yeni bir komut girin.)"
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 break
+
         return reply
+
 
     # ------------------------------------------------------------------
     # STREAM CHAIN
@@ -215,7 +225,7 @@ class OpenAIAgent:
 
             stream_resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.refine(),
+                messages=self.context_memory.refine(with_id=True),
                 tools=tool_defs,
                 stream=True,
             )
@@ -233,6 +243,7 @@ class OpenAIAgent:
 
                 if chunk.choices[0].finish_reason is not None:
                     finish_reason = chunk.choices[0].finish_reason
+                    print(f"!!!!!!!!!!!!!!!!!!!!{finish_reason}!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
@@ -253,43 +264,62 @@ class OpenAIAgent:
                         )
                         if p["id"] and p["type"] and p["name"] and args_ready:
                             try:
+                                # Sadece burada parse et, aksi halde biriktirmeye devam
                                 args_dict = json.loads(p["arguments"])
                             except json.JSONDecodeError:
-                                args_dict = {}
-                            call_id = p["id"]
+                                # Henüz tam gelmemiş olabilir, bir sonraki chunk'ı bekle
+                                continue
+                    
                             tool_calls.append({
-                                call_id: {
-                                    "id": call_id,
+                                    "id": p["id"],
                                     "type": p["type"],
                                     "name": p["name"],
                                     "arguments": p["arguments"],
                                 }
-                            })
+                            )
                             del tool_parts[tc.index]
 
+            content=""
             if buffer.strip():
-                self.context_memory.add_assistant_reply(buffer)
+                content=buffer
+            if len(tool_calls)==0:
+                self.context_memory.add_assistant_reply(content)
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 yield json.dumps({"type": "end", "tps": tps()})
+            else:
+                tool_calls_with_result = []
 
-            for tool_call in tool_calls:
-                self.context_memory.add_tool_calls(tool_call)
-                try:
-                    result = await self.tool_client.call_tool(call_id, p["name"], args_dict)
-                except Exception as ex:
-                    result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
-                    await self._notify_status({"state": AgentStatus.ERROR.value})
+                for tool_call in tool_calls:
+                    call_id = tool_call["id"]
+                    name = tool_call["name"]
+                    args = json.loads(tool_call["arguments"])
+                    try:
+                        print("in------------------->",json.dumps(args))
+                        result = await self.tool_client.call_tool(call_id, name, args)
+                        print("out------------------->",json.dumps(args))
+                    except Exception as ex:
+                        result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
+                        print("----------->",result)
+                        await self._notify_status({"state": AgentStatus.ERROR.value})
 
-                self.context_memory.add_tool_result(
-                    call_id,
-                    result if isinstance(result, str) else json.dumps(result),
-                )
-                yield json.dumps({
-                    "type": "tool_result",
-                    "call_id": call_id,
-                    "result": result,
-                    "tps": tps(),
-                })
+                    tool_calls_with_result.append({
+                        "id": call_id,
+                        "type": tool_call["type"],
+                        "name": name,
+                        "arguments": tool_call["arguments"],
+                        "result": result if isinstance(result, str) else json.dumps(result),
+                    })
+                    print("2 out------------------->",json.dumps(tool_calls_with_result[-1]))
+                    #yield json.dumps({
+                    #    "type": "tool_result",
+                    #    "call_id": call_id,
+                    #    "result": result,
+                    #    "tps": tps(),
+                    #})
+                print("3 out------------------->")
+                self.context_memory.add_assistant_reply(None, tool_calls_with_result)
+                print("4 out------------------->")
+                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
 
             if finish_reason == "stop":
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})

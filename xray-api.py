@@ -65,7 +65,7 @@ async def setup_app_state(app):
     setup_all(app, tool_clients=tool_clients)
 
     app.state.memory.add_observer(lambda memory: asyncio.create_task(
-        broadcast_ws_event({"event": "memory_update", "data": {"messages": memory.refine(with_id=False)}})
+        broadcast_ws_event({"event": "memory_update", "data": {"messages": memory.refine()}})
     ))
 
     app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
@@ -114,8 +114,7 @@ async def ws_bridge(ws: WebSocket):
     ws_clients.add(ws)
     try:
         if hasattr(app.state, "memory"):
-            await ws.send_json({"event": "memory_update",
-                                "data": {"messages": app.state.memory.refine(with_id=False)}})
+            await ws.send_json({"event": "memory_update","data": {"messages": app.state.memory.refine()}})
         while True:
             raw = await ws.receive_text()
             msg = json.loads(raw)
@@ -216,7 +215,7 @@ async def replay_chat(request: Request):
         models = getattr(app.state, "xray_models", [])
         model_cfg = get_model_config(model, models)
         # refine ile al, sadece system ve user mesajları
-        base_msgs = [m for m in memory.refine(with_id=False) if m["role"] in ("system", "user")]
+        base_msgs = [m for m in memory.refine() if m["role"] in ("system", "user")]
         memory.clear()
         for msg in base_msgs:
             if msg["role"] == "system":
@@ -253,7 +252,7 @@ async def replay_until_message(until_id: str, request: Request):
     model_cfg = get_model_config(model, models)
 
     # Mesajları refine ile al, with_id=False ile temiz içerik
-    original_msgs = [m for m in memory.refine(with_id=False)]
+    original_msgs = [m for m in memory.refine()]
 
     # until_id'ye sahip user mesajının indexi
     idx = next((i for i, m in enumerate(original_msgs) if m["meta"]["id"] == until_id and m["role"] == "user"), None)
