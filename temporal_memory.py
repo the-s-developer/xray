@@ -1,6 +1,7 @@
 from context_memory import ContextMemory
 from typing import List, Dict, Any, Optional, Set
 from tool_local_client import ToolLocalClient
+import fnmatch
 import re
 
 # ---------------------------------------------------------------------------
@@ -9,7 +10,10 @@ import re
 
 MAX_TOOL_CONTENT_CHARS: int = 256  # Trim threshold for tool responses
 _TRIM_NOTICE: str = "\n[response trimmed because it exceeded the context limit]"
-_MEMORY_TOKEN_RE: re.Pattern[str] = re.compile(r"#(\w+)")  # #key tokenizer
+
+# ``#`` followed by *word*, ``:``, ``*`` or ``?``  → captures hierarchical or
+# wildcard token names.
+_MEMORY_TOKEN_RE: re.Pattern[str] = re.compile(r"#([\w:*?]+)")
 
 
 class TemporalMemory(ContextMemory):
@@ -82,51 +86,57 @@ class TemporalMemory(ContextMemory):
         return "success"
 
     def recall(self, keys: List[str]) -> Dict[str, Any]:
-        """Fetch the stored message(s) referenced by one or more *keys*.  ⚙️ **Tool for the LLM**
+        """Fetch one or more stored messages.  ⚙️ **Tool for the LLM**
 
-        The LLM should call this when it encounters a ``#key`` token inside a
-        user prompt and needs the full content.  The function will return the
-        raw message content and its id so the assistant can, for example,
-        inject the text into its context.
+        Supports *wildcard* patterns so ``recall(["projA:*"])`` returns **all**
+        keys under ``projA``.  Each returned entry is of the form::
 
-        Parameters
-        ----------
-        keys : list[str]
-            One or more hashtags *without* the leading ``#``.
-
-        Returns
-        -------
-        dict[str, dict | None]
-            A mapping like ``{"myKey": {"content": "...", "msg_id": "..."}, ...}``.
-            If a key is unknown ``None`` is returned for that entry so the model
-            can react accordingly.
+            {
+                "myKey": {
+                    "content": "...full text...",
+                    "msg_id": "..."
+                },
+                "anotherKey": None            # if key not found
+            }
         """
         out: Dict[str, Any] = {}
-        for k in keys:
-            meta = self.keys.get(k)
-            if not meta:
-                out[k] = None
+        for pattern in keys:
+            # Direct hit first
+            if pattern in self.keys:
+                meta = self.keys[pattern]
+                msg = self.get_message(meta["msg_id"])
+                out[pattern] = {"content": msg.get("content") if msg else None,
+                                "msg_id": meta["msg_id"]}
                 continue
-            msg = self.get_message(meta["msg_id"])
-            out[k] = {"content": msg.get("content") if msg else None, "msg_id": meta["msg_id"]}
+
+            # Otherwise treat *pattern* as a wildcard
+            matches = [k for k in self.keys if fnmatch.fnmatch(k, pattern)]
+            if not matches:
+                out[pattern] = None
+                continue
+
+            for k in matches:
+                meta = self.keys[k]
+                msg = self.get_message(meta["msg_id"])
+                out[k] = {"content": msg.get("content") if msg else None,
+                          "msg_id": meta["msg_id"]}
         return out
 
     def status(self) -> Dict[str, Dict[str, str]]:
-        """List all keys the LLM has memorized so far.  ⚙️ **Tool for the LLM**
-
-        This lets the assistant decide whether it needs to store new
-        information or can reuse an existing entry.
-
-        Returns
-        -------
-        dict[str, dict]
-            ``{"key": {"description": "...", "msg_id": "..."}, ...}``
-        """
-        # Read status of keys from single dictionary
+        """List all memorised keys grouped by top‑level *scope*.  ⚙️ **Tool**"""
+        # Build grouped view for human readability
+        grouped: Dict[str, List[str]] = {}
+        for key in self.keys:
+            top = key.split(":", 1)[0]
+            grouped.setdefault(top, []).append(key)
+        # Ensure deterministic order
+        for vals in grouped.values():
+            vals.sort()
         return {
             k: {"description": meta["description"], "msg_id": meta["msg_id"]}
             for k, meta in self.keys.items()
-        }
+        } | {"_groups": grouped}
+
 
     # ------------------------------------------------------------------
     # TOOL-CLIENT
@@ -219,21 +229,22 @@ class TemporalMemory(ContextMemory):
             if m.get("role") == "user":
                 last_user_idx = len(refined) - 1
 
-        # Pass 3 – expand #memoryKey in last user prompt
+        # Pass 3 – expand #memoryKey tokens (hierarchical + wildcard)
         if last_user_idx is not None:
             u = refined[last_user_idx]
             txt = u.get("content", "")
-            keys = _MEMORY_TOKEN_RE.findall(txt)
-            if keys:
-                resolved = self.recall(keys)
-                if isinstance(resolved, dict):
-                    for k, v in resolved.items():
-                        if v is None:
-                            continue
-                        content = v["content"]
-                        txt = txt.replace(f"#{k}", content)
-                    u["content"] = txt
-                    refined[last_user_idx] = u
+            patterns = _MEMORY_TOKEN_RE.findall(txt)
+            for pattern in patterns:
+                results = self.recall([pattern])
+                # Gather all non‑None contents
+                contents = [
+                    v["content"] for v in results.values() if v and v["content"]
+                ]
+                if contents:
+                    combined = "\n".join(contents)
+                    txt = txt.replace(f"#{pattern}", combined)
+            u["content"] = txt
+            refined[last_user_idx] = u
 
         # Pass 4 – append status block to first system message
         if self.show_temporal_status_in_refine:
