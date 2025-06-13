@@ -15,17 +15,26 @@ _TRIM_NOTICE: str = "\n[response trimmed because it exceeded the context limit]"
 # wildcard token names.
 _MEMORY_TOKEN_RE: re.Pattern[str] = re.compile(r"#([\w:*?]+)")
 
+# blank line after header
+_HEADER_SEP: str = "\n\n"
+
 
 class TemporalMemory(ContextMemory):
-    """A context-aware memory helper that lets the LLM *persist*, *recall* and
-    *inspect* small snippets of conversation using simple #tokens.
+    """A context‑aware memory helper that lets the LLM *persist*, *recall* and
+    *inspect* small snippets of conversation via simple `#tokens`.
 
-    The three public *tool* methods – :py:meth:`memorize`, :py:meth:`recall` and
-    :py:meth:`status` – are automatically exposed to the LLM so that it can call
-    them just like any other function-tool.  Each carries a docstring written
-    for the language-model so that it knows **what the function does, which
-    arguments it expects and what it returns**.
+    **Behaviour (revised 2025‑06‑13)**
+    ----------------------------------
+    *   When a `#key` appears in the *last* user message, every referenced
+        message is injected *un‑trimmed* into the prompt for that turn.
+    *   Inline‑expand logic is disabled – tokens remain as‑is.
+    *   All memorised messages start with a header listing their key(s) and
+        descriptions so the LLM is always aware of long‑term memory content.
     """
+
+    # ------------------------------------------------------------------
+    # INITIALISATION
+    # ------------------------------------------------------------------
 
     def __init__(
         self,
@@ -35,10 +44,8 @@ class TemporalMemory(ContextMemory):
         show_temporal_status_in_refine: bool = True,
     ) -> None:
         super().__init__(system=system)
-
-        # Single dictionary: key → {"msg_id": ..., "description": ...}
+        # key → {"msg_id": …, "description": …}
         self.keys: Dict[str, Dict[str, str]] = {}
-
         self.skip_memorized = skip_memorized
         self.show_temporal_status_in_refine = show_temporal_status_in_refine
 
@@ -55,134 +62,167 @@ class TemporalMemory(ContextMemory):
             lines.append(f"- `{k}`: {meta.get('description', '')}")
         return "\n".join(lines) + "\n\n"
 
+    def _build_header_for_msg(self, msg_id: str) -> str:
+        parts: List[str] = []
+        for k, meta in self.keys.items():
+            if meta.get("msg_id") == msg_id:
+                desc = meta.get("description", "")
+                parts.append(f"[{k}] {desc}" if desc else f"[{k}]")
+        return " | ".join(parts) + _HEADER_SEP if parts else ""
     # --------------------------------------------------------------
-    # MEMORY MANAGEMENT – *tool* METHODS
+    # MEMORY MANAGEMENT – TOOL METHODS
     # --------------------------------------------------------------
 
     def memorize(self, key: str, msg_id: str, description: str) -> str:
-        """Memorize a message for later recall.  ⚙️ **Tool for the LLM**
+        """
+        ⚙️ **Tool** – Persist a message snippet for later reuse.
+
+        Call this *immediately after* adding a message you want to turn into a
+        reusable snippet.
 
         Parameters
         ----------
         key : str
-            A short human-readable identifier (single word) that will be used
-            inside user prompts as a *hashtag*, e.g. ``#myFact``.
+            Friendly, **unique** identifier (e.g. ``"projA:intro"``). You will
+            refer to the snippet later in prompts via ``#projA:intro``.
         msg_id : str
-            The internal *message-id* returned by :py:meth:`ContextMemory.add_message`.
-            This id points to the piece of conversation we want to store.
+            The `msg_id` returned by :py:meth:`ContextMemory.add_message` for
+            the message you're storing.
         description : str
-            A brief explanation that will be shown to the language-model when it
-            queries :py:meth:`status` so it can remember what this key stands for.
+            One‑sentence, human‑readable summary. Displayed by
+            :py:meth:`status` *and* prepended as a header so the model knows
+            *what it is* without reading the whole text.
 
         Returns
         -------
         str
-            The same *msg_id* that was stored.  Useful as a confirmation value.
+            The literal string ``"success"`` on success.
+
+        Raises (returned as an ``{"error": …}`` dict)
+        ---------------------------------------------
+        * Empty or missing arguments.
+        * Duplicate ``key`` (overwrites silently unless you check).
         """
         if not key or not msg_id or not description:
-            return {"error":"msg_id ve description boş olamaz"}
-        
+            return {"error": "msg_id ve description boş olamaz"}
         self.keys[key] = {"msg_id": msg_id, "description": description}
         return "success"
 
     def recall(self, keys: List[str]) -> Dict[str, Any]:
-        """Fetch one or more stored messages.  ⚙️ **Tool for the LLM**
+        """
+        ⚙️ **Tool** – Retrieve previously memorised snippets programmatically.
 
-        Supports *wildcard* patterns so ``recall(["projA:*"])`` returns **all**
-        keys under ``projA``.  Each returned entry is of the form::
+        You can also inject snippets into a prompt by writing ``#key`` directly,
+        but this function lets you fetch them inside a tool‑call chain.
 
-            {
-                "myKey": {
-                    "content": "...full text...",
-                    "msg_id": "..."
-                },
-                "anotherKey": None            # if key not found
-            }
+        Parameters
+        ----------
+        keys : List[str]
+            Exact key names **or** wildcard patterns. Wildcards follow Unix
+            rules – ``*`` matches any sequence (including ``:``), ``?`` matches
+            a single character.
+
+        Examples
+        --------
+        >>> recall(["meeting:notes"])
+        >>> recall(["projA:*", "*summary"])
+
+        Returns
+        -------
+        Dict[str, Any]
+            Mapping from *resolved* key → result, where each *result* is either
+            ``{"content": <str | None>, "msg_id": <str>}`` or ``None`` if the
+            pattern matched nothing.
+
+        Notes
+        -----
+        *Returned* ``content`` is never trimmed – you receive the full text that
+        was originally stored.
         """
         out: Dict[str, Any] = {}
         for pattern in keys:
-            # Direct hit first
-            if pattern in self.keys:
+            if pattern in self.keys:  # exact hit
                 meta = self.keys[pattern]
                 msg = self.get_message(meta["msg_id"])
-                out[pattern] = {"content": msg.get("content") if msg else None,
-                                "msg_id": meta["msg_id"]}
+                out[pattern] = {
+                    "content": msg.get("content") if msg else None,
+                    "msg_id": meta["msg_id"],
+                }
                 continue
-
-            # Otherwise treat *pattern* as a wildcard
             matches = [k for k in self.keys if fnmatch.fnmatch(k, pattern)]
             if not matches:
                 out[pattern] = None
                 continue
-
             for k in matches:
                 meta = self.keys[k]
                 msg = self.get_message(meta["msg_id"])
-                out[k] = {"content": msg.get("content") if msg else None,
-                          "msg_id": meta["msg_id"]}
+                out[k] = {
+                    "content": msg.get("content") if msg else None,
+                    "msg_id": meta["msg_id"],
+                }
         return out
 
+
     def status(self) -> Dict[str, Dict[str, str]]:
-        """List all memorised keys grouped by top‑level *scope*.  ⚙️ **Tool**"""
-        # Build grouped view for human readability
+        """⚙️ **Tool** – Overview of all stored keys grouped by namespace."""
         grouped: Dict[str, List[str]] = {}
         for key in self.keys:
             top = key.split(":", 1)[0]
             grouped.setdefault(top, []).append(key)
-        # Ensure deterministic order
         for vals in grouped.values():
             vals.sort()
-        return {
-            k: {"description": meta["description"], "msg_id": meta["msg_id"]}
-            for k, meta in self.keys.items()
-        } | {"_groups": grouped}
-
+        return {k: {"description": m["description"], "msg_id": m["msg_id"]}
+                for k, m in self.keys.items()} | {"_groups": grouped}
 
     # ------------------------------------------------------------------
-    # TOOL-CLIENT
+    # TOOL‑CLIENT REGISTRATION
     # ------------------------------------------------------------------
 
     def create_tool_client(self):
-        """Register *tool* functions with a :pyclass:`ToolLocalClient`."""
+        """Register tool methods and return the client (for list_tools etc.)."""
         client = ToolLocalClient(server_id="temporal-memory")
         client.register_tool_auto(self.recall)
         client.register_tool_auto(self.memorize)
-        #client.register_tool_auto(self.status)
+        client.register_tool_auto(self.status)
         return client
 
+    
     # ------------------------------------------------------------------
-    # REFINE LOGIC – NOT EXPOSED AS TOOLS
+    # REFINE – FULL IMPLEMENTATION (safe for missing 'content')
     # ------------------------------------------------------------------
 
     def refine(self, with_id: bool = False) -> List[Dict[str, Any]]:  # noqa: C901
-        """Return a pruned/annotated transcript that follows the *7-rule spec*.
-
-        This method is intended for *internal* use and therefore is **not**
-        registered as a tool.  It reconstructs the conversation while applying
-        several rules (dropping redundant recall exchanges, trimming long tool
-        outputs, expanding #tokens, etc.).
-        """
         raw = list(self.snapshot())
 
-        # Identify all *temporal-memory* call-IDs by scanning assistant tool_calls
+        # STEP 0 – tokens in last user msg → referenced ids
+        patterns: List[str] = []
+        referenced_msg_ids: Set[str] = set()
+        for idx in range(len(raw) - 1, -1, -1):
+            if raw[idx].get("role") == "user":
+                patterns = _MEMORY_TOKEN_RE.findall(raw[idx].get("content", ""))
+                break
+        if patterns:
+            for pattern in patterns:
+                hits = [pattern] if pattern in self.keys else [k for k in self.keys if fnmatch.fnmatch(k, pattern)]
+                for k in hits:
+                    referenced_msg_ids.add(self.keys[k]["msg_id"])
+
+        memory_msg_ids: Set[str] = {meta["msg_id"] for meta in self.keys.values()}
+
+        # STEP 1 – mark recall exchanges to drop
         temporal_callids: Set[str] = set()
         assistant_for: Dict[str, int] = {}
         tool_for: Dict[str, int] = {}
-        for idx, m in enumerate(raw):
+        for i, m in enumerate(raw):
             if m.get("role") == "assistant":
                 for tc in m.get("tool_calls", []):
                     cid = tc.get("id")
-                    fn_name = tc.get("function", {}).get("name", "")
                     if cid:
-                        assistant_for[cid] = idx
-                        if fn_name.startswith("temporal-memory"):
+                        assistant_for[cid] = i
+                        if tc.get("function", {}).get("name", "").startswith("temporal-memory"):
                             temporal_callids.add(cid)
-            elif m.get("role") == "tool":
-                cid = m.get("tool_call_id")
-                if cid:
-                    tool_for[cid] = idx
-
-        # Pass 1 – mark recall exchanges that can be dropped (rule 7)
+            elif (cid := m.get("tool_call_id")):
+                tool_for[cid] = i
         drop: Set[str] = set()
         for cid in temporal_callids:
             t_idx = tool_for.get(cid)
@@ -193,97 +233,79 @@ class TemporalMemory(ContextMemory):
                 recalled = eval(t_msg.get("content", "{}"))
             except Exception:
                 continue
-            if not isinstance(recalled, dict):
-                continue
-            if all(k in self.keys for k in recalled):
+            if isinstance(recalled, dict) and all(k in self.keys for k in recalled):
                 drop.add(t_msg["meta"]["id"])
-                a_idx = assistant_for.get(cid)
-                if a_idx is not None:
-                    drop.add(raw[a_idx]["meta"]["id"])
+                drop.add(raw[assistant_for[cid]]["meta"]["id"])
 
-        # Pass 2 – rebuild transcript
+        # STEP 2 – rebuild transcript
         refined: List[Dict[str, Any]] = []
-        last_user_idx: Optional[int] = None
         for m in raw:
             mid = m.get("meta", {}).get("id")
             if mid in drop:
                 continue
-            m = dict(m)  # shallow copy
+            m = dict(m)  # copy
 
-            # Trim long tool responses *except* temporal-memory ones
+            content_str = m.get("content", "") if isinstance(m.get("content"), str) else ""
+
+            # header for memorised messages
+            if mid in memory_msg_ids:
+                header = self._build_header_for_msg(mid)
+                if header and not content_str.startswith(header):
+                    content_str = header + content_str
+
+            # restore trimmed content if referenced this turn
+            if mid in referenced_msg_ids and content_str.endswith(_TRIM_NOTICE):
+                orig = self.get_message(mid)
+                if orig:
+                    content_str = self._build_header_for_msg(mid) + orig.get("content", "")
+
+            # trim long tool outputs (unless protected)
             if (
-                m.get("role") == "tool"
-                and m.get("tool_call_id") not in temporal_callids
-                and len(m.get("content", "")) > MAX_TOOL_CONTENT_CHARS
+                m.get("role") == "tool" and
+                m.get("tool_call_id") not in temporal_callids and
+                len(content_str) > MAX_TOOL_CONTENT_CHARS and
+                mid not in referenced_msg_ids
             ):
-                m["content"] = (m.get("content") or "")[:MAX_TOOL_CONTENT_CHARS] + _TRIM_NOTICE
+                content_str = content_str[:MAX_TOOL_CONTENT_CHARS] + _TRIM_NOTICE
 
-            # Inject [msg-id] except for temporal-memory tool outputs
-            if with_id and mid and m.get("role") in ("assistant", "tool"):
-                if not (
-                    m.get("role") == "tool" and m.get("tool_call_id") in temporal_callids
-                ):
-                    m["content"] = f"{m.get('content') or ''}\n[msg-id:{mid}]"
+            # inject msg-id tag safely
+            if with_id and mid and m.get("role") in ("assistant", "tool") and not (
+                m.get("role") == "tool" and m.get("tool_call_id") in temporal_callids
+            ):
+                content_str = f"{content_str}{_HEADER_SEP.rstrip()}[msg-id:{mid}]"
 
+            if content_str:
+                m["content"] = content_str
             refined.append(m)
-            if m.get("role") == "user":
-                last_user_idx = len(refined) - 1
 
-        # Pass 3 – expand #memoryKey tokens (hierarchical + wildcard)
-        if last_user_idx is not None:
-            u = refined[last_user_idx]
-            txt = u.get("content", "")
-            patterns = _MEMORY_TOKEN_RE.findall(txt)
-            for pattern in patterns:
-                results = self.recall([pattern])
-                # Gather all non‑None contents
-                contents = [
-                    v["content"] for v in results.values() if v and v["content"]
-                ]
-                if contents:
-                    combined = "\n".join(contents)
-                    txt = txt.replace(f"#{pattern}", combined)
-            u["content"] = txt
-            refined[last_user_idx] = u
-
-        # Pass 4 – append status block to first system message
+        # STEP 3 – append status block
         if self.show_temporal_status_in_refine:
             block = self._temporal_status_block()
             if block:
                 for m in refined:
                     if m.get("role") == "system":
-                        m["content"] += block
+                        m["content"] = m.get("content", "") + block
                         break
 
         return refined
 
 
-"""
-TemporalMemory demo script – unchanged, kept for reference.
-"""
+# ---------------------------------------------------------------------------
+# Demo / quick test
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    from temporal_memory import TemporalMemory   # Adjust if file name changes
-
-    # 1) Instantiate TemporalMemory
     tm = TemporalMemory(system="Sistem mesajı: Hoş geldiniz!")
-    print(tm.status())
 
-    msg_id = tm.add_message({"role": "assistant", "content": "Bu mesajı hafızaya alacağız."})
+    aid = tm.add_message({"role": "assistant", "content": "Bu mesajı hafızaya alacağız."})
+    tm.memorize("frrev", aid, "Fransız Devrimi ilk mesajı")
 
-    # 3) Store the message under a key
-    tm.memorize(key="frrev", msg_id=msg_id, description="Fransız Devrimi ilk mesajı")
-
-    # 4) The user sends a prompt that references #frrev
     tm.add_message({"role": "user", "content": "Lütfen #frrev hakkında bana bir soru sor."})
 
-    # 5) Call refine() to test the #frrev substitution
-    refined = tm.refine(with_id=True)   # with_id=True to show msg-id tags
-
-    # 6) Print the last user message
-    last_user = refined[-1]
-    print("=== Son kullanıcı iletisi (refine sonrası) ===")
-    print(last_user["content"])
-    print("\n=== Tüm refine çıktısı ===")
+    print("\n--- Refine output (with msg ids) ---")
+    refined = tm.refine(with_id=True)
     for m in refined:
-        print(f"[{m['role']}]\t{m['content']}")
+        print(f"[{m['role']}]\t{m['content'][:100]}…")
+
+    tools_client = tm.create_tool_client()
+    print("\nRegistered tool functions:", tools_client.list_tools())
