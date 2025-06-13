@@ -115,7 +115,7 @@ class OpenAIAgent:
 
             resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.snapshot(),
+                messages=self.context_memory.cycle(),
                 tools=tool_defs,
                 stream=False,
             )
@@ -215,7 +215,7 @@ class OpenAIAgent:
 
             stream_resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.snapshot(),
+                messages=self.context_memory.cycle(),
                 tools=tool_defs,
                 stream=True,
             )
@@ -274,7 +274,7 @@ class OpenAIAgent:
             for tool_call in tool_calls:
                 self.context_memory.add_tool_calls(tool_call)
                 try:
-                    result = await self.tool_client.call_tool(call_id, p["name"], args_dict)
+                    result = await self.tool_client.call_tool(call_id, tool_call["name"], args_dict)
                 except Exception as ex:
                     result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
                     await self._notify_status({"state": AgentStatus.ERROR.value})
