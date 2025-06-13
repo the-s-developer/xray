@@ -28,11 +28,11 @@ def ensure_meta(msg):
 class ContextMemory:
     """Conversation buffer with private messages list."""
 
-    def __init__(self, system_prompt: Optional[str] = None):
+    def __init__(self, system: Optional[str] = None):
         self.__messages: List[Dict[str, Any]] = []
         self._observers: List[Callable] = []
-        if system_prompt is not None:
-            self.set_system_prompt(system_prompt)
+        if system is not None:
+            self.set_system_prompt(system)
 
     # --- Observer methods ---
     def add_observer(self, callback: Callable) -> None:

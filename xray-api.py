@@ -56,10 +56,8 @@ async def setup_app_state(app):
     tools = config.get("tools", [])
     tool_clients = [build_tool_from_config(t) for t in tools]
 
-    #app.state.memory = ContextMemory(system_prompt="You are a helpful assistant.")
-    app.state.memory = ContextMemory(system_prompt="You are a helpful assistant.")
-    app.state.temporal=TemporalMemory(app.state.memory)
-    tool_clients.append(app.state.temporal.create_tool_client())
+    app.state.memory=TemporalMemory(system="You are a helpful assistant.")
+    tool_clients.append(app.state.memory.create_tool_client())
 
     app.state.xray_models = models
     app.state.xray_tools = tools

@@ -5,19 +5,15 @@ from typing import List, Dict, Any, Optional
 from tool_local_client import ToolLocalClient
 import logging
 
-class TemporalMemory():
+class TemporalMemory(ContextMemory):
     """
     TemporalMemory, önceki mesajlara dayalı olarak içerikleri hafızaya yazan ve
     anahtarlarla bu içerikleri geri çağıran bir yardımcı bellek sistemidir.
     """
 
-    def __init__(
-        self,
-        context_memory
-        
-    ):
+    def __init__(self,system: str):
+        super().__init__(system=system)
         self.data: Dict[str, str] = {}
-        self.memory=context_memory
 
     def memorize(self, key: str, msg_id: str) -> str:
         """
