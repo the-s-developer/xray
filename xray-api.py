@@ -67,7 +67,7 @@ async def setup_app_state(app):
     setup_all(app, tool_clients=tool_clients)
 
     app.state.memory.add_observer(lambda memory: asyncio.create_task(
-        broadcast_ws_event({"event": "memory_update", "data": {"messages":memory.refine(with_id=False)}})
+        broadcast_ws_event({"event": "memory_update", "data": {"messages": memory.refine(with_id=False)}})
     ))
 
     app.state.ui_tool_client = ToolWebSocketClient("ui", ws_clients)
