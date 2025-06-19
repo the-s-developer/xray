@@ -80,7 +80,7 @@ class OpenAIAgent:
         return fr == "stop" and (no_toolcalls or no_content)
     
     def dump(self):
-        dump_messages(self.context_memory.refine(with_id=True), "refined_memory_dump.json")
+        dump_messages(self.context_memory.refine(), "refined_memory_dump.json")
         dump_messages(self.context_memory.snapshot(), "orginal_memory_dump.json")
     # ------------------------------------------------------------------
     # Public ask entrypoint
@@ -116,7 +116,7 @@ class OpenAIAgent:
 
             resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.refine(with_id=True),
+                messages=self.context_memory.refine(),
                 tools=tool_defs,
                 stream=False,
             )
@@ -174,8 +174,8 @@ class OpenAIAgent:
 
             # --- Cevap ve/veya tool-calls context'e topluca ekleniyor ---
             if tool_calls_with_result:
-                # buffer boşsa content None gönderebilirsin, streaming'de olduğu gibi
-                self.context_memory.add_assistant_reply(buffer if buffer else None, tool_calls_with_result)
+                self.context_memory.add_assistant_reply(None, tool_calls_with_result)
+
             elif buffer.strip():
                 self.context_memory.add_assistant_reply(buffer)
             else:
@@ -225,7 +225,7 @@ class OpenAIAgent:
 
             stream_resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.refine(with_id=True),
+                messages=self.context_memory.refine(),
                 tools=tool_defs,
                 stream=True,
             )
@@ -284,6 +284,7 @@ class OpenAIAgent:
                 content=buffer
             if len(tool_calls)==0:
                 self.context_memory.add_assistant_reply(content)
+                self.context_memory.notify_observers()
                 await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 yield json.dumps({"type": "end", "tps": tps()})
             else:
@@ -309,20 +310,17 @@ class OpenAIAgent:
                         "arguments": tool_call["arguments"],
                         "result": result if isinstance(result, str) else json.dumps(result),
                     })
-                    print("2 out------------------->",json.dumps(tool_calls_with_result[-1]))
-                    #yield json.dumps({
-                    #    "type": "tool_result",
-                    #    "call_id": call_id,
-                    #    "result": result,
-                    #    "tps": tps(),
-                    #})
-                print("3 out------------------->")
-                self.context_memory.add_assistant_reply(None, tool_calls_with_result)
-                print("4 out------------------->")
-                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
+                    # yield json.dumps({
+                    #     "type": "tool_result",
+                    #     "call_id": call_id,
+                    #     "result": result,
+                    #     "tps": tps(),
+                    # })
 
+                self.context_memory.add_assistant_reply(None, tool_calls_with_result)
+                self.context_memory.notify_observers()
+            await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
             if finish_reason == "stop":
-                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
                 yield json.dumps({
                     "type": "end",
                     "info": "Soru tamamlandı, lütfen yeni bir komut girin.",

@@ -8,8 +8,8 @@ import re
 # CONSTANTS
 # ---------------------------------------------------------------------------
 
-MAX_TOOL_CONTENT_CHARS: int = 256  # Trim threshold for tool responses
-_TRIM_NOTICE: str = "\n[response trimmed because it exceeded the context limit]"
+MAX_TOOL_CONTENT_CHARS: int = 10000  # Trim threshold for tool responses
+_TRIM_NOTICE: str = "\n[response trimmed]"
 
 # ``#`` followed by *word*, ``:``, ``*`` or ``?``  → captures hierarchical or
 # wildcard token names.

@@ -28,9 +28,10 @@ def ensure_meta(msg):
 class ContextMemory:
     """Conversation buffer with private messages list."""
 
-    def __init__(self, system: Optional[str] = None):
+    def __init__(self, system: Optional[str] = None, *, dedup_tool_calls: bool = True):
+        self._dedup_tool_calls: bool = dedup_tool_calls
         self.__messages: List[Dict[str, Any]] = []
-        self._observers: List[Callable] = []
+        self._observers: List[Callable[["ContextMemory"], None]] = []
         if system is not None:
             self.set_system_prompt(system)
 
@@ -38,8 +39,8 @@ class ContextMemory:
     def add_observer(self, callback: Callable) -> None:
         self._observers.append(callback)
 
-    def remove_observer(self, callback: Callable) -> None:
-        self._observers = [cb for cb in self._observers if cb != callback]
+    def clear_observers(self) -> None:
+        self._observers = []
 
     def notify_observers(self):
         for cb in self._observers:
@@ -53,7 +54,6 @@ class ContextMemory:
     # --- Message mutators ---
     def clear(self, keep_system: bool = True) -> None:
         self.__messages = [m for m in self.__messages if keep_system and m["role"] == "system"]
-        self.notify_observers()
 
     def add_message(self, msg: Dict[str, Any], meta=None) -> Any:
         if msg.get("role") == "system":
@@ -65,7 +65,6 @@ class ContextMemory:
             merged_meta = {**new_msg.get("meta", {}), **meta}
             new_msg["meta"] = merged_meta
         self.__messages.append(new_msg)
-        self.notify_observers()
         return new_msg["meta"]["id"]
 
     # Convenience methods for adding typed messages
@@ -73,52 +72,47 @@ class ContextMemory:
         self.__messages = [m for m in self.__messages if m["role"] != "system"]
         msg = ensure_meta({"role": "system", "content": content.strip()})
         self.__messages.insert(0, msg)
-        self.notify_observers()
 
     def add_user_prompt(self, content: str) -> None:
         id=self.add_message({"role": "user", "content": content})
-        self.notify_observers()
         return id
 
 
-    def add_assistant_reply(self,content: Optional[str],tool_calls_with_result: Optional[List[Dict[str, Any]]]=None) -> None:
-        assistan_reply={
+    def add_assistant_reply(
+        self,
+        content: Optional[str],
+        tool_calls_with_result: Optional[List[Dict[str, Any]]] = None
+    ) -> None:
+        assistant_reply = {
             "role": "assistant"
         }
-        tool_responses=[]
-        
         if tool_calls_with_result:
-            tool_calls = [
+            assistant_reply["content"] = None
+            assistant_reply["tool_calls"] = [
                 {
                     "type": call["type"],
                     "id": call["id"],
                     "function": {
                         "name": call["name"],
                         "arguments": call["arguments"],
-                    },
-                }  for call in tool_calls_with_result
+                    }
+                }
+                for call in tool_calls_with_result
             ]
-            assistan_reply["tool_calls"]=tool_calls
-            import json
+            assistant_id = self.add_message(assistant_reply)
+            # Sadece BİR assistant mesajı, ardından her tool_call için tool mesajı!
             for call in tool_calls_with_result:
-                tool_responses.append({
+                self.add_message({
                     "role": "tool",
-                    "tool_call_id":call["id"],
+                    "tool_call_id": call["id"],
                     "content": call["result"],
-                })
-
-        if len(tool_responses)>0:
-            assistan_reply["tool_calls"]=tool_calls
-            for tr in tool_responses:
-                assistant_id=self.add_message(assistan_reply)
-                self.add_message(tr,meta={"assistant_id":assistant_id})
-        elif content:    
-             assistan_reply["content"]=content
-             assistant_id=self.add_message(assistan_reply)
+                }, meta={"assistant_id": assistant_id})
+        elif content:
+            assistant_reply["content"] = content
+            self.add_message(assistant_reply)
         else:
-            raise ValueError("")
-        
-        self.notify_observers()
+            raise ValueError("Assistant reply: No content or tool call!")
+
         
 
     def get_message(self, msg_id: str) -> Optional[Dict[str, Any]]:
@@ -131,7 +125,6 @@ class ContextMemory:
         for msg in self.__messages:
             if msg.get("meta", {}).get("id") == msg_id:
                 msg["content"] = new_content
-                self.notify_observers()
                 return True
         return False
 
@@ -141,7 +134,6 @@ class ContextMemory:
             return None
         new_msg = ensure_meta({"role": role, "content": content})
         self.__messages.insert(index + 1, new_msg)
-        self.notify_observers()
         return new_msg["meta"]["id"]
 
     def delete_after(self, msg_id: str) -> bool:
@@ -154,7 +146,6 @@ class ContextMemory:
             # Don't allow deleting system prompt
             return False
         self.__messages = self.__messages[:index]
-        self.notify_observers()
         return True
     
     def delete(self, ids: List[str]) -> int:
@@ -185,8 +176,50 @@ class ContextMemory:
         deleted_count = len(self.__messages) - len(new_messages)
         if deleted_count > 0:
             self.__messages = new_messages
-            self.notify_observers()
         return deleted_count
 
+     # ------------------------------------------------------------------
+    # Refinement
+    # ------------------------------------------------------------------
     def refine(self) -> List[Dict[str, Any]]:
-        return self.snapshot()
+        """Return a *clean* view of the conversation buffer.
+
+        If *dedup_tool_calls* is **True**, duplicate tool‑calls (identical
+        ``function.name`` + ``arguments``) are pruned so that **only the most
+        recent** call and its tool response remain.  Otherwise the snapshot is
+        returned unchanged.
+        """
+        msgs = self.snapshot()
+        if not self._dedup_tool_calls:
+            return msgs  # early exit – deduplication disabled
+
+        # 1. Map each tool response line: call_id -> index
+        tool_line_of_call: Dict[str, int] = {
+            m.get("tool_call_id"): idx
+            for idx, m in enumerate(msgs)
+            if m.get("role") == "tool"
+        }
+
+        # 2. Collect every assistant tool‑call entry
+        calls: List[tuple] = []  # (assistant_idx, call_id, key, created_at)
+        for idx, m in enumerate(msgs):
+            if m.get("role") == "assistant" and "tool_calls" in m:
+                created = m.get("meta", {}).get("created_at", 0)
+                for call in m["tool_calls"]:
+                    key = (call["function"]["name"], str(call["function"]["arguments"]))
+                    calls.append((idx, call["id"], key, created))
+
+        # 3. Traverse backwards, keeping first (i.e., latest) occurrence per key
+        seen: set = set()
+        remove: set[int] = set()
+        for a_idx, call_id, key, _ in reversed(calls):
+            if key in seen:
+                # Older duplicate – mark assistant line and its tool line
+                remove.add(a_idx)
+                t_idx = tool_line_of_call.get(call_id)
+                if t_idx is not None:
+                    remove.add(t_idx)
+            else:
+                seen.add(key)
+
+        return [m for i, m in enumerate(msgs) if i not in remove]

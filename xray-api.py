@@ -15,7 +15,6 @@ os.environ["UVICORN_LOG_LEVEL"] = "error"
 from xray_config import load_xray_config, get_model_config, build_tool_from_config, get_db_config
 from openai_agent import OpenAIAgent
 from context_memory import ContextMemory
-from temporal_memory import TemporalMemory
 from tool_router import ToolRouter
 from tool_websocket_client import ToolWebSocketClient
 
@@ -40,6 +39,8 @@ async def set_status_and_notify(state: str, tps: float = 0.0, job_id: str | None
     await agent_status_notify(backend_status)
 
 async def broadcast_ws_event(event_data):
+    print("--------------------------------------->broadcast event",event_data)
+
     closed = set()
     for ws in ws_clients:
         try:
@@ -55,9 +56,10 @@ async def setup_app_state(app):
     models = config.get("models", [])
     tools = config.get("tools", [])
     tool_clients = [build_tool_from_config(t) for t in tools]
-
-    app.state.memory=TemporalMemory(system="You are a helpful assistant.")
-    tool_clients.append(app.state.memory.create_tool_client())
+    
+    app.state.memory=ContextMemory(system="You are a helpful assistant.")
+    #app.state.memory=TemporalMemory(system="You are a helpful assistant.")
+    #tool_clients.append(app.state.memory.create_tool_client())
 
     app.state.xray_models = models
     app.state.xray_tools = tools
@@ -74,8 +76,7 @@ async def setup_app_state(app):
 
 async def cleanup_app_state(app):
     if hasattr(app.state, 'memory'):
-        if hasattr(app.state.memory, "_observers"):
-            app.state.memory._observers.clear()
+        app.state.memory.clear_observers()
     if hasattr(app.state, "router"):
         try:
             await app.state.router.__aexit__(None, None, None)
@@ -113,8 +114,7 @@ async def ws_bridge(ws: WebSocket):
     await ws.accept()
     ws_clients.add(ws)
     try:
-        if hasattr(app.state, "memory"):
-            await ws.send_json({"event": "memory_update","data": {"messages": app.state.memory.refine()}})
+        await ws.send_json({"event": "memory_update","data": {"messages": app.state.memory.refine()}})
         while True:
             raw = await ws.receive_text()
             msg = json.loads(raw)
@@ -184,6 +184,7 @@ async def insert_after_message(request: Request):
     new_id = app.state.memory.insert_after(after_id, role, content)
     if new_id is None:
         return {"error": "Mesaj bulunamadı"}
+    app.state.memory.notify_observers()
     return {"status": "ok", "id": new_id}
 
 
@@ -200,6 +201,8 @@ async def delete_after_message(msg_id: str):
     success = app.state.memory.delete_after(msg_id)
     if not success:
         return {"error": "System prompt silinemez veya mesaj bulunamadı"}
+
+    app.state.memory.notify_observers()
     return {"status": "ok"}
 
 @app.post("/api/chat/replay")
@@ -297,6 +300,7 @@ async def bulk_delete(request: Request):
     data = await request.json()
     ids_to_delete = set(data.get("ids", []))
     deleted_count = app.state.memory.delete(list(ids_to_delete))
+    app.state.memory.notify_observers()
     return {"status": "ok", "deleted": deleted_count}
 
 @app.post("/api/chat/restart")
@@ -312,14 +316,9 @@ async def restart_backend():
 
     await set_status_and_notify("idle", 0, None)
 
-    # Only clear memory, do NOT re-enter or exit context managers!
     app.state.memory.clear()
-    await broadcast_ws_event({
-        "event": "memory_update",
-        "data": {"messages": app.state.memory.snapshot()}
-    })
-    await broadcast_ws_event({"event": "backend_reset"})
-    return {"status": "ok", "message": "Backend resetlendi."}
+    app.state.memory.notify_observers()
+    return {"status": "ok"}
 
 @app.get("/api/chat/prompts")
 async def get_chat_prompts():
@@ -333,7 +332,7 @@ async def set_chat_prompts(request: Request):
     memory.clear()
     for prm in prompts:
         memory.add_message(prm)
-    memory._notify_observers()
+    memory.notify_observers()
     return {"status": "ok"}
 
 @app.get("/api/tools")
