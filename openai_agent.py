@@ -219,6 +219,7 @@ class OpenAIAgent:
 
         await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start", "tps":tps(), "loop": loop_guard, "max_loop": MAX_TOOL_LOOP})
         self.context_memory.add_user_prompt(prompt)
+        self.context_memory.notify_observers()
 
         
         from collections import defaultdict
