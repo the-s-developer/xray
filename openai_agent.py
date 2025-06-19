@@ -136,7 +136,10 @@ class OpenAIAgent:
                     "state": AgentStatus.GENERATING.value,
                     "phase": "partial_assistant",
                     "content": buffer,
+                    "loop": loop_guard,
+                    "max_loop": MAX_TOOL_LOOP,
                 })
+
 
             # ----------- Tool-call geldiyse -----------
             if msg.tool_calls:
@@ -188,7 +191,12 @@ class OpenAIAgent:
             if finish_reason == "stop":
                 if not buffer.strip():
                     reply += "\n(Soru tamamlandı, lütfen yeni bir komut girin.)"
-                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
+                await self._notify_status({
+                    "state": AgentStatus.DONE.value,
+                    "phase": "done",
+                    "loop": loop_guard,
+                    "max_loop": MAX_TOOL_LOOP,
+                })
                 break
 
         return reply
@@ -202,19 +210,23 @@ class OpenAIAgent:
         if self.client is None:
             raise RuntimeError("Agent not initialized – use `async with`")
 
-        await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
-        self.context_memory.add_user_prompt(prompt)
-
+        loop_guard = 0
+        
         token_count = 0
         t0 = time.perf_counter()
         tps = lambda: token_count / max(time.perf_counter() - t0, 1e-3)
 
+
+        await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start", "tps":tps(), "loop": loop_guard, "max_loop": MAX_TOOL_LOOP})
+        self.context_memory.add_user_prompt(prompt)
+
+        
         from collections import defaultdict
-        loop_guard = 0
         while True:
             if loop_guard >= MAX_TOOL_LOOP:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
             loop_guard += 1
+            await self._notify_status({"state": AgentStatus.GENERATING.value,"phase": "loop", "tps":tps(), "loop": loop_guard, "max_loop": MAX_TOOL_LOOP })            
 
             tool_defs = await self.tool_client.list_tools()
             buffer: str = ""
@@ -235,11 +247,7 @@ class OpenAIAgent:
                 if delta.content:
                     buffer += delta.content
                     token_count += len(delta.content.split())
-                    yield json.dumps({
-                        "type": "partial_assistant",
-                        "content": buffer,
-                        "tps": tps(),
-                    })
+                    yield json.dumps({"type": "partial_assistant","content": buffer})
 
                 if chunk.choices[0].finish_reason is not None:
                     finish_reason = chunk.choices[0].finish_reason
@@ -285,8 +293,8 @@ class OpenAIAgent:
             if len(tool_calls)==0:
                 self.context_memory.add_assistant_reply(content)
                 self.context_memory.notify_observers()
-                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
-                yield json.dumps({"type": "end", "tps": tps()})
+                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed", "tps":tps(), "loop": loop_guard, "max_loop": MAX_TOOL_LOOP})
+                yield json.dumps({"type": "end"})
             else:
                 tool_calls_with_result = []
 
@@ -301,7 +309,7 @@ class OpenAIAgent:
                     except Exception as ex:
                         result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
                         print("----------->",result)
-                        await self._notify_status({"state": AgentStatus.ERROR.value})
+                        await self._notify_status({"state": AgentStatus.ERROR.value, "tps":tps(), "loop": loop_guard, "max_loop": MAX_TOOL_LOOP})
 
                     tool_calls_with_result.append({
                         "id": call_id,
@@ -319,13 +327,13 @@ class OpenAIAgent:
 
                 self.context_memory.add_assistant_reply(None, tool_calls_with_result)
                 self.context_memory.notify_observers()
-            await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed"})
+            await self._notify_status({"state": AgentStatus.DONE.value, "phase": "done","tps":tps(), "loop": loop_guard, "max_loop": MAX_TOOL_LOOP})
             if finish_reason == "stop":
                 yield json.dumps({
                     "type": "end",
-                    "info": "Soru tamamlandı, lütfen yeni bir komut girin.",
-                    "tps": tps(),
+                    "info": "Soru tamamlandı, lütfen yeni bir komut girin."
                 })
+                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "idle", "tps":tps(), "loop": loop_guard, "max_loop": MAX_TOOL_LOOP})
                 break
 
         self.dump()

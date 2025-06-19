@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import os, asyncio, logging, traceback, uuid, json
+import os, asyncio, logging, traceback, uuid, json, time
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -25,18 +25,10 @@ logger = logging.getLogger("xray")
 logging.basicConfig(level=logging.INFO)
 
 ws_clients = set()
-active_job: dict[str, asyncio.Task] = {}
-backend_status = {"state": "idle", "tps": 0.0, "job_id": None}
-
-def _update_status(state: str, tps: float = 0.0, job_id: str | None = None):
-    backend_status.update({"state": state, "tps": round(tps, 2), "job_id": job_id})
+active_job:  asyncio.Task = None
 
 async def agent_status_notify(status):
     await broadcast_ws_event({"event": "agent_status", "data": status})
-
-async def set_status_and_notify(state: str, tps: float = 0.0, job_id: str | None = None):
-    _update_status(state, tps, job_id)
-    await agent_status_notify(backend_status)
 
 async def broadcast_ws_event(event_data):
     print("--------------------------------------->broadcast event",event_data)
@@ -128,6 +120,14 @@ async def ws_bridge(ws: WebSocket):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.exception("API genel hata: %s", exc)
+    await broadcast_ws_event({
+        "event": "error",
+        "type": "exception",
+        "message": str(exc),
+        "detail": traceback.format_exc(),
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "path": str(request.url)
+    })    
     return JSONResponse(
         status_code=500,
         content={"error": str(exc), "trace": traceback.format_exc()}
@@ -170,6 +170,7 @@ async def update_message(msg_id: str, request: Request):
 
     updated = app.state.memory.update_content(msg_id, content)
     if updated:
+        app.state.memory.notify_observers()
         return {"status": "ok", "message": "Updated.", "id": msg_id}
     return {"error": "message not found"}
 
@@ -207,9 +208,8 @@ async def delete_after_message(msg_id: str):
 
 @app.post("/api/chat/replay")
 async def replay_chat(request: Request):
-    if backend_status["state"] == "running":
+    if active_job:
         return JSONResponse({"error": "Başka bir iş zaten çalışıyor."}, status_code=409)
-    await set_status_and_notify("running")
     try:
         data = await request.json()
         model = data.get("model")
@@ -240,10 +240,8 @@ async def replay_chat(request: Request):
         return {"status": "ok"}
     except Exception as exc:
         logger.exception("Replay sırasında hata oluştu: %s", exc)
-        await set_status_and_notify("idle")
         return JSONResponse({"error": str(exc)}, status_code=500)
-    finally:
-        await set_status_and_notify("idle")
+
         
 @app.post("/api/chat/replay_until/{until_id}")
 async def replay_until_message(until_id: str, request: Request):
@@ -306,15 +304,13 @@ async def bulk_delete(request: Request):
 @app.post("/api/chat/restart")
 async def restart_backend():
     try:
-        job_id = backend_status.get("job_id")
-        task = active_job.get(job_id)
-        if task:
-            task.cancel()
-            active_job.pop(job_id, None)
-    except:
-        pass
+        if active_job:
+            active_job.cancel()
+    except Exception as e:
+        logger.error(e)
+    finally:
+        active_job=None
 
-    await set_status_and_notify("idle", 0, None)
 
     app.state.memory.clear()
     app.state.memory.notify_observers()
@@ -373,18 +369,18 @@ async def ask(request: Request):
 
 @app.post("/api/chat/ask_stream")
 async def ask_stream(request: Request):
-    if backend_status["state"] == "running":
+    if active_job:
         return JSONResponse({"error": "Başka bir iş zaten çalışıyor."}, status_code=409)
     data = await request.json()
     prompt = data["message"]
     model_id = data.get("model")
     job_id = str(uuid.uuid4())
-    await set_status_and_notify("running", job_id=job_id)
     models = getattr(app.state, "xray_models", [])
     model_cfg = get_model_config(model_id, models)
     async def gen():
+        global active_job
         task = asyncio.current_task()
-        active_job[job_id] = task
+        active_job = task
         try:
             async with OpenAIAgent(
                 api_key=model_cfg["api_key"],
@@ -396,36 +392,20 @@ async def ask_stream(request: Request):
            ) as agent:
                 agent_stream = await agent.ask(prompt, stream=True)
                 async for sse in agent_stream:
-                    try:
-                        payload = json.loads(sse.removeprefix("data: ").strip())
-                        if payload.get("type") == "end":
-                            await set_status_and_notify("idle", payload.get("tps", 0), None)
-                    except Exception:
-                        pass
                     yield sse if sse.startswith("data:") else f"data: {sse}\n\n"
         except asyncio.CancelledError:
             yield "data: " + json.dumps({"type": "stopped"}) + "\n\n"
         finally:
-            active_job.pop(job_id, None)
-            if backend_status["job_id"] == job_id:
-                await set_status_and_notify("idle", 0, None)
+            active_job = None
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 @app.post("/api/chat/stop")
 async def stop_job():
-    task = active_job.get(backend_status.get("job_id"))
-    if task:
-        task.cancel()
+    if active_job:
+        active_job.cancel()
         return {"status": "cancelling"}
     return {"status": "idle"}
 
-@app.get("/api/chat/status")
-async def get_status():
-    return backend_status
-
-@app.get("/api/chat/raw_messages")
-async def get_raw_messages():
-    return {"messages": app.state.memory.snapshot()}
 
 if __name__ == "__main__":
     import uvicorn
