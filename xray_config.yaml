@@ -76,11 +76,24 @@ tools:
   - id: scout
     type: stdio
     command: npx
-    args: ["-y", "@playwright/mcp@latest"]
+    args:
+      - -y
+      - "@playwright/mcp@latest"
+      #- --executable-path
+      #- '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      #- --user-data-dir
+      #- '/Volumes/playground/userprofile'
+
   - id: python-environment
     type: stdio
     command: python
-    args: ["pw_simulator/main.py"]
+    args:
+      - pw_simulator/main.py
+      - --chrome-path
+      - '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      - --user-data-dir
+      - '/Volumes/playground/userprofile'
+
   # - id: longterm_memory
   #   type: stdio
   #   command: python

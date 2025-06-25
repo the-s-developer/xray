@@ -31,8 +31,6 @@ async def agent_status_notify(status):
     await broadcast_ws_event({"event": "agent_status", "data": status})
 
 async def broadcast_ws_event(event_data):
-    print("--------------------------------------->broadcast event",event_data)
-
     closed = set()
     for ws in ws_clients:
         try:
@@ -49,6 +47,8 @@ async def setup_app_state(app):
     tools = config.get("tools", [])
     tool_clients = [build_tool_from_config(t) for t in tools]
     
+    app.state.max_tool_loop = 10
+
     app.state.memory=ContextMemory(system="You are a helpful assistant.")
     #app.state.memory=TemporalMemory(system="You are a helpful assistant.")
     #tool_clients.append(app.state.memory.create_tool_client())
@@ -231,6 +231,7 @@ async def replay_chat(request: Request):
                     tool_client=router,
                     context_memory=memory,
                     on_status_update=agent_status_notify,
+                    max_tool_loop=getattr(app.state, "max_tool_loop", 10),
                 ) as agent:
                     await agent.ask(
                         msg["content"],
@@ -276,6 +277,7 @@ async def replay_until_message(until_id: str, request: Request):
             tool_client=router,
             context_memory=memory,
             on_status_update=agent_status_notify,
+            max_tool_loop=getattr(app.state, "max_tool_loop", 10),
         ) as agent:
             # until_id mesajını stream ile yeniden çalıştır
             agent_stream = await agent.ask(original_msgs[idx]["content"], stream=True)
@@ -360,6 +362,7 @@ async def ask(request: Request):
         tool_client=app.state.router,
         context_memory=app.state.memory,
         on_status_update=agent_status_notify,
+        max_tool_loop=getattr(app.state, "max_tool_loop", 10),
     ) as agent:
         reply = await agent.ask(
             data["message"],
@@ -389,6 +392,7 @@ async def ask_stream(request: Request):
                 tool_client=app.state.router,
                 context_memory=app.state.memory,
                 on_status_update=agent_status_notify,
+                max_tool_loop=getattr(app.state, "max_tool_loop", 10),
            ) as agent:
                 agent_stream = await agent.ask(prompt, stream=True)
                 async for sse in agent_stream:
@@ -406,6 +410,12 @@ async def stop_job():
         return {"status": "cancelling"}
     return {"status": "idle"}
 
+@app.post("/api/settings/max_tool_loop")
+async def set_max_tool_loop(request: Request):
+    data = await request.json()
+    val = int(data.get("value", 10))
+    app.state.max_tool_loop = max(1, min(val, 50))  # 1-50 arası sınır
+    return {"status": "ok", "max_tool_loop": app.state.max_tool_loop}
 
 if __name__ == "__main__":
     import uvicorn

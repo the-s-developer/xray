@@ -31,10 +31,20 @@ def read_injectable_code():
             footer = f.read()
     return header, footer
 
-async def execute_python_code(code: str, no_prints=True, max_count: int = 5) -> dict[str, Any]:
+async def execute_python_code(code: str, no_prints=True, max_count: int = 5,chrome_path=None,user_data_dir=None) -> dict[str, Any]:
     if not code.strip():
         return {"success": False, "error": "No code provided", "stdout": "", "stderr": "", "json": None}
+        
+    chrome_path_code = ""
+    if chrome_path is not None:
+        chrome_path_code += f'CHROME_PATH = r"""{chrome_path}"""\n'
+    else:
+        chrome_path_code += 'CHROME_PATH = None\n'
 
+    if user_data_dir is not None:
+        chrome_path_code += f'USER_DATA_DIR = r"""{user_data_dir}"""\n'
+    else:
+        chrome_path_code += 'USER_DATA_DIR = None\n'
 
     code=replace_libname(code)
 
@@ -42,8 +52,9 @@ async def execute_python_code(code: str, no_prints=True, max_count: int = 5) -> 
         code = f"MAX_COUNT = {max_count}\n" + code
 
     
+    
     header, footer = read_injectable_code()
-    full_code = header + "\n" + code + "\n" + footer
+    full_code = chrome_path_code + header + "\n" + code + "\n" + footer
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:

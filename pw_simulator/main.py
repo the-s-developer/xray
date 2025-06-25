@@ -1,9 +1,17 @@
 from mcp.server.fastmcp import FastMCP
 from pw_runner.runner import execute_python_code
-from dotenv import load_dotenv
-load_dotenv()
 
+import argparse
+import os
 
+# .env öncesine koy
+parser = argparse.ArgumentParser()
+parser.add_argument("--chrome-path", type=str)
+parser.add_argument("--user-data-dir", type=str)
+args, unknown = parser.parse_known_args()
+
+# from dotenv import load_dotenv
+# load_dotenv()
 
 mcp = FastMCP("python_environment")
 @mcp.tool(
@@ -18,7 +26,7 @@ mcp = FastMCP("python_environment")
 
 )
 async def execute(python_code: str):
-    return  await execute_python_code(python_code, no_prints=False)
+    return  await execute_python_code(python_code, no_prints=False,chrome_path=args.chrome_path,user_data_dir=args.user_data_dir)
 
 
 if __name__ == "__main__":

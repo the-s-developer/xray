@@ -12,24 +12,26 @@ except (ImportError, AttributeError):
 orig_launch = sync_browser_type.launch
 orig_launch_persistent = sync_browser_type.launch_persistent_context
 
-def launch_with_env(self, *args, **kwargs):
-    chrome_path = os.environ.get("CHROME_PATH")
-    if ("executablePath" not in kwargs or kwargs["executablePath"] is None) and chrome_path:
-        kwargs["executablePath"] = chrome_path
-    return orig_launch(self, *args, **kwargs)
+# def launch(self, *args, **kwargs):
+#     if ("executablePath" not in kwargs or kwargs["executablePath"] is None) and CHROME_PATH:
+#         kwargs["executablePath"] = CHROME_PATH
+#     kwargs["headless"] = False
+#     return orig_launch(self, *args, **kwargs)
 
-def launch_persistent_with_env(self, *args, **kwargs):
-    chrome_path = os.environ.get("CHROME_PATH")
-    patch_user_data_dir = os.environ.get("USER_DATA_DIR")
+# def launch_persistent_with_env(self, *args, **kwargs):
+    
+#     kwargs["userDataDir"] = USER_DATA_DIR
+#     if ("executablePath" not in kwargs or kwargs["executablePath"] is None) and CHROME_PATH:
+#         kwargs["executablePath"] = CHROME_PATH
+#     kwargs["headless"] = False
+#     return orig_launch_persistent(self, *args, **kwargs)
 
-    kwargs["userDataDir"] = patch_user_data_dir
-
-    if ("executablePath" not in kwargs or kwargs["executablePath"] is None) and chrome_path:
-        kwargs["executablePath"] = chrome_path
+def launch(self, *args, **kwargs):
+    kwargs["userDataDir"] = USER_DATA_DIR
+    if ("executablePath" not in kwargs or kwargs["executablePath"] is None) and CHROME_PATH:
+        kwargs["executablePath"] = CHROME_PATH
+    kwargs["headless"] = False
     return orig_launch_persistent(self, *args, **kwargs)
 
-# Patch fonksiyonlarını ata
-sync_browser_type.launch = launch_with_env
-sync_browser_type.launch_persistent_context = launch_persistent_with_env
-
-from playwright.sync_api import sync_playwright
+sync_browser_type.launch = launch
+sync_browser_type.launch_persistent_context = launch
