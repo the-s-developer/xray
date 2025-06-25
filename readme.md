@@ -2,6 +2,10 @@
 
 XRAY is a memory-centric, OpenAI-compatible LLM orchestrator that supports function-calling (tool-calls), context replay, and persistent memory snippets via token-based referencing.
 
+<p align="left">
+  <img src="./assets/ss1.jpg" width="100%" />
+</p>
+
 ## 🚀 Features
 
 - ✅ **ContextMemory**: Stores all messages during a session with support for replay and refinement.
