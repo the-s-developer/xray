@@ -1,6 +1,11 @@
 # 🧠 XRAY: Context-Aware LLM Agentic Prompt Optimization Tool 
 
-XRAY is a memory-centric, OpenAI-compatible LLM orchestrator that supports function-calling (tool-calls), context replay, and persistent memory snippets via token-based referencing.
+XRAY is a utility that enables the creation of task- and workflow-oriented prompts through an advanced chat console. Developed by a single person (that's me 🙂) in just three weeks, it consists of a backend (Python FastAPI) and a frontend (ReactJS UI). Since it uses the OpenAI client, it can work with OpenAI Cloud (via API key) as well as inference engines that support OpenAI APIs, such as vLLM and Ollama.
+
+The tool allows LLMs to execute Python code in the environment via functions. It can retrieve web content using a Playwright MCP server/browser, and other MCP servers can be easily integrated via configuration.
+
+I've also added MCP servers for temporal memory and long-term memory (which actually use an embedded vector database for semantic search). These features are still in the experimental phase, but I plan to develop these concepts further in the future.
+
 
 <p align="left">
   <img src="./assets/ss1.jpg" width="100%" />
