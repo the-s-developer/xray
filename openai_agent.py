@@ -9,8 +9,9 @@ from context_memory import ContextMemory
 from status_enum import AgentStatus
 
 def dump_messages(messages, path="messages_dump.json"):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(messages, f, indent=2, ensure_ascii=False)
+    # with open(path, "w", encoding="utf-8") as f:
+    #     json.dump(messages, f, indent=2, ensure_ascii=False)
+    pass
 
 class OpenAIAgent:
     """Async OpenAI agent that supports function-calling (tool-calls) and streaming."""
@@ -304,12 +305,9 @@ class OpenAIAgent:
                     name = tool_call["name"]
                     args = json.loads(tool_call["arguments"])
                     try:
-                        print("in------------------->",json.dumps(args))
                         result = await self.tool_client.call_tool(call_id, name, args)
-                        print("out------------------->",json.dumps(args))
                     except Exception as ex:
                         result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
-                        print("----------->",result)
                         await self._notify_status({"state": AgentStatus.ERROR.value, "tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop})
 
                     tool_calls_with_result.append({
