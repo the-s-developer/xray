@@ -1,27 +1,4 @@
 # 🧠 XRAY: Context-Aware LLM Agentic Prompt Optimization Tool 
-<a 
-  href="https://www.linkedin.com/comm/mynetwork/discovery-see-all?usecase=PEOPLE_FOLLOWS&followMember=the-software-developer" 
-  target="_blank"
-  style="
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 7px;
-    text-align: center;
-    outline: none;
-    text-decoration: none;
-    color: #ffffff;
-    width: 200px;
-    height: 32px;
-    border-radius: 16px;
-    background-color: #0A66C2;
-    font-family: 'SF Pro Text', Helvetica, sans-serif;
-  "
->
-  Follow Me
-</a>
-
-
 XRAY is a utility that enables the creation of task- and workflow-oriented prompts through an advanced chat console. Developed by a single person (that's me 🙂) in just three weeks, it consists of a backend (Python FastAPI) and a frontend (ReactJS UI). Since it uses the OpenAI client, it can work with OpenAI Cloud (via API key) as well as inference engines that support OpenAI APIs, such as vLLM and Ollama.
 
 The tool allows LLMs to execute Python code in the environment via functions. It can retrieve web content using a Playwright MCP server/browser, and other MCP servers can be easily integrated via configuration.
