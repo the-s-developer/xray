@@ -5,10 +5,19 @@ The tool allows LLMs to execute Python code in the environment via functions. It
 
 I've also added MCP servers for temporal memory and long-term memory (which actually use an embedded vector database for semantic search). These features are still in the experimental phase, but I plan to develop these concepts further in the future.
 
-
+<iframe
+  width="560"
+  height="315"
+  src="https://www.youtube.com/embed/HA41foTC9zY"
+  title="YouTube video player"
+  frameborder="0"
+  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+  allowfullscreen
+></iframe>
+<!--
 <p align="left">
   <img src="./assets/ss1.jpg" width="100%" />
-</p>
+</p>-->
 
 ## 🚀 Features
 
