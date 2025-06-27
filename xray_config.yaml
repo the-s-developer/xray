@@ -54,6 +54,10 @@ models:
     label:  qwen3:14b (ollama)
     base_url: http://localhost:11434/v1
     api_key: "no_key"
+  - id:  hf.co/bartowski/deepcogito_cogito-v1-preview-qwen-32B-GGUF:Q4_K_M
+    label:  deepcogito_cogito-v1-preview-qwen-32B-GGUF:Q4_K_M (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: "no_key"    
   - id: devstral:24b
     label: mistral devstral:24b (ollama)
     base_url: http://localhost:11434/v1
@@ -72,27 +76,27 @@ models:
     api_key: "no_key"
 
 # === TOOLS ===
-tools:
-  - id: scout
-    type: stdio
-    command: npx
-    args:
-      - -y
-      - "@playwright/mcp@latest"
+# tools:
+#   - id: scout
+#     type: stdio
+#     command: npx
+#     args:
+#       - -y
+#       - "@playwright/mcp@latest"
       #- --executable-path
       #- '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
       #- --user-data-dir
       #- '/Volumes/playground/userprofile'
 
-  - id: python-environment
-    type: stdio
-    command: python
-    args:
-      - pw_simulator/main.py
-      - --chrome-path
-      - '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-      - --user-data-dir
-      - '/Volumes/playground/userprofile'
+  # - id: python-environment
+  #   type: stdio
+  #   command: python
+  #   args:
+  #     - pw_simulator/main.py
+  #     - --chrome-path
+  #     - '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  #     - --user-data-dir
+  #     - '/Volumes/playground/userprofile'
 
   # - id: longterm_memory
   #   type: stdio
