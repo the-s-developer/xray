@@ -43,10 +43,8 @@ with sync_playwright() as p:
 ----
 USER PROMPT:
 workflow:
-1. go meb.gov.tr
-2. go announcements page (not in main page)
-3. go to  a detail page
-5. mandatory: don't write answer until success
-4. create scraper script , navigates announcement details pages and get date, title , url, content information
-5. execute and validate result, refine code if it unsuccess
-6. iterate 4-5 loop until successfull result
+1. go haberler.com
+2. find technology news with images
+3. create scraper script
+5. execute and validate result, fix code if it is unsuccess
+6. iterate loop until successfull result
