@@ -46,6 +46,7 @@ async def setup_app_state(app):
     models = config.get("models", [])
     tools = config.get("tools", [])
     tool_clients = [build_tool_from_config(t) for t in tools]
+
     
     app.state.max_tool_loop = 10
 
@@ -151,14 +152,14 @@ async def list_models():
     models = getattr(app.state, "xray_models", [])
     model_list = []
     for m in models:
-        model_id = m.get("id") or m.get("model_id") or m.get("name")
-        model_name = model_id or str(m)
-        label = m.get("label") or model_name.replace("-", " ").upper()
+        config_id = m.get("id")
+        label = m.get("label")
         model_list.append({
-            "value": model_name,
+            "value": config_id,
             "label": label,
         })
     return {"models": model_list}
+
 
 
 @app.patch("/api/chat/{msg_id}")
@@ -212,11 +213,12 @@ async def replay_chat(request: Request):
         return JSONResponse({"error": "Başka bir iş zaten çalışıyor."}, status_code=409)
     try:
         data = await request.json()
-        model = data.get("model")
         memory = app.state.memory
-        router = app.state.router
         models = getattr(app.state, "xray_models", [])
-        model_cfg = get_model_config(model, models)
+        model_config_id = data.get("model")
+        model_cfg = get_model_config(model_config_id, models)
+        enable_tools = model_cfg.get("enable_tools", True)
+        router = app.state.router  if enable_tools else None        
         # refine ile al, sadece system ve user mesajları
         base_msgs = [m for m in memory.refine() if m["role"] in ("system", "user")]
         memory.clear()
@@ -227,7 +229,7 @@ async def replay_chat(request: Request):
                 async with OpenAIAgent(
                     api_key=model_cfg["api_key"],
                     base_url=model_cfg["base_url"],
-                    model_id=model,
+                    model_id=model_cfg["model_id"],
                     tool_client=router,
                     context_memory=memory,
                     on_status_update=agent_status_notify,
@@ -248,10 +250,12 @@ async def replay_chat(request: Request):
 async def replay_until_message(until_id: str, request: Request):
     memory = app.state.memory
     data = await request.json()
-    model = data.get("model")
     router = app.state.router
     models = getattr(app.state, "xray_models", [])
-    model_cfg = get_model_config(model, models)
+    model_config_id = data.get("model")
+    model_cfg = get_model_config(model_config_id, models)
+    enable_tools = model_cfg.get("enable_tools", True)
+    router = app.state.router  if enable_tools else None   
 
     # Mesajları refine ile al, with_id=False ile temiz içerik
     original_msgs = [m for m in memory.refine()]
@@ -273,7 +277,7 @@ async def replay_until_message(until_id: str, request: Request):
         async with OpenAIAgent(
             api_key=model_cfg["api_key"],
             base_url=model_cfg["base_url"],
-            model_id=model,
+            model_id=model_cfg["model_id"],
             tool_client=router,
             context_memory=memory,
             on_status_update=agent_status_notify,
@@ -352,14 +356,17 @@ async def run_tool(request: Request):
 @app.post("/api/chat/ask")
 async def ask(request: Request):
     data = await request.json()
-    model_id = data.get("model")
     models = getattr(app.state, "xray_models", [])
-    model_cfg = get_model_config(model_id, models)
+    model_config_id = data.get("model")
+    model_cfg = get_model_config(model_config_id, models)
+    enable_tools = model_cfg.get("enable_tools", True)
+    router = app.state.router  if enable_tools else None   
+
     async with OpenAIAgent(
         api_key=model_cfg["api_key"],
         base_url=model_cfg["base_url"],
-        model_id=model_id,
-        tool_client=app.state.router,
+        model_id=model_cfg["model_id"],
+        tool_client=router,
         context_memory=app.state.memory,
         on_status_update=agent_status_notify,
         max_tool_loop=getattr(app.state, "max_tool_loop", 10),
@@ -376,10 +383,11 @@ async def ask_stream(request: Request):
         return JSONResponse({"error": "Başka bir iş zaten çalışıyor."}, status_code=409)
     data = await request.json()
     prompt = data["message"]
-    model_id = data.get("model")
-    job_id = str(uuid.uuid4())
     models = getattr(app.state, "xray_models", [])
-    model_cfg = get_model_config(model_id, models)
+    model_config_id = data.get("model")
+    model_cfg = get_model_config(model_config_id, models)
+    enable_tools = model_cfg.get("enable_tools", True)
+    router = app.state.router  if enable_tools else None   
     async def gen():
         global active_job
         task = asyncio.current_task()
@@ -388,8 +396,8 @@ async def ask_stream(request: Request):
             async with OpenAIAgent(
                 api_key=model_cfg["api_key"],
                 base_url=model_cfg["base_url"],
-                model_id=model_id,
-                tool_client=app.state.router,
+                model_id=model_cfg["model_id"],
+                tool_client=router,
                 context_memory=app.state.memory,
                 on_status_update=agent_status_notify,
                 max_tool_loop=getattr(app.state, "max_tool_loop", 10),

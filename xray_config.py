@@ -37,15 +37,13 @@ def get_db_config(cfg=None, config_path=None):
     db_name = xray_cfg.get("db_name", "xray")
     return mongo_uri, db_name
 
-def get_model_config(model_id, models):
-    """
-    models parametresi bir liste (dict değil!).
-    """
-    import json
-    for m in models:
-        if m["id"] == model_id:
-            return m
-    raise ValueError(f"Model not found: {model_id}")
+def get_model_config(config_id, models):
+    """Config içinden id ile modeli bulur."""
+    for model in models:
+        if model.get("id") == config_id:
+            model["enable_tools"] = model.get("enable_tools", True)
+            return model
+    raise ValueError(f"Model config bulunamadı: {config_id}")
 
 
 def get_tool_config(tool_id, cfg=None, config_path=None):

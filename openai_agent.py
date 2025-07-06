@@ -21,8 +21,8 @@ class OpenAIAgent:
         api_key: str,
         base_url: str,
         model_id: str,
-        tool_client: ToolClient,
         context_memory: ContextMemory,
+        tool_client: ToolClient = None,
         on_status_update: Optional[Callable[[dict], None]] = None,
         max_tool_loop=10        
     ):
@@ -105,7 +105,6 @@ class OpenAIAgent:
 
         await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start"})
         self.context_memory.add_user_prompt(prompt)
-        tool_defs = await self.tool_client.list_tools()
 
         loop_guard = 0
         reply = ""
@@ -115,9 +114,13 @@ class OpenAIAgent:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
             loop_guard += 1
 
+            tool_defs = None
+            if self.tool_client is not None:
+                tool_defs = await self.tool_client.list_tools()
+
             resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.refine(),
+                messages=self.context_memory.refine(no_metadata=True),
                 tools=tool_defs,
                 stream=False,
             )
@@ -215,10 +218,11 @@ class OpenAIAgent:
         
         token_count = 0
         t0 = time.perf_counter()
-        tps = lambda: token_count / max(time.perf_counter() - t0, 1e-3)
 
+        async def notify_status():
+            tps = lambda: token_count / max(time.perf_counter() - t0, 1e-3)
+            await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start", "tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop})
 
-        await self._notify_status({"state": AgentStatus.GENERATING.value, "phase": "start", "tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop})
         self.context_memory.add_user_prompt(prompt)
         self.context_memory.notify_observers()
 
@@ -228,24 +232,29 @@ class OpenAIAgent:
             if loop_guard >= self.max_tool_loop:
                 raise RuntimeError("MAX_TOOL_LOOP limit aşıldı – muhtemel sonsuz döngü")
             loop_guard += 1
-            await self._notify_status({"state": AgentStatus.GENERATING.value,"phase": "loop", "tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop })            
+            await notify_status()
 
-            tool_defs = await self.tool_client.list_tools()
             buffer: str = ""
             tool_parts: Dict[int, Dict[str, Any]] = defaultdict(
                 lambda: {"id": None, "type": None, "name": None, "arguments": ""}
             )
             finish_reason: Optional[str] = None
 
+
+            tool_defs = None
+            if self.tool_client is not None:
+                tool_defs = await self.tool_client.list_tools()
             stream_resp = await self.client.chat.completions.create(
                 model=self.model_id,
-                messages=self.context_memory.refine(),
+                messages=self.context_memory.refine(no_metadata=True),
                 tools=tool_defs,
                 stream=True,
             )
             tool_calls = []
             async for chunk in stream_resp:
                 delta = chunk.choices[0].delta
+                await notify_status()
+
                 if delta.content:
                     buffer += delta.content
                     token_count += len(delta.content.split())
@@ -295,7 +304,7 @@ class OpenAIAgent:
             if len(tool_calls)==0:
                 self.context_memory.add_assistant_reply(content)
                 self.context_memory.notify_observers()
-                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "completed", "tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop})
+                await notify_status()
                 yield json.dumps({"type": "end"})
             else:
                 tool_calls_with_result = []
@@ -308,7 +317,7 @@ class OpenAIAgent:
                         result = await self.tool_client.call_tool(call_id, name, args)
                     except Exception as ex:
                         result = json.dumps({"error": "TOOL EXECUTION FAILED", "detail": str(ex)})
-                        await self._notify_status({"state": AgentStatus.ERROR.value, "tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop})
+                        await notify_status()
 
                     tool_calls_with_result.append({
                         "id": call_id,
@@ -326,13 +335,14 @@ class OpenAIAgent:
 
                 self.context_memory.add_assistant_reply(None, tool_calls_with_result)
                 self.context_memory.notify_observers()
-            await self._notify_status({"state": AgentStatus.DONE.value, "phase": "done","tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop})
+
+            await notify_status()
+
             if finish_reason == "stop":
                 yield json.dumps({
                     "type": "end",
                     "info": "Soru tamamlandı, lütfen yeni bir komut girin."
                 })
-                await self._notify_status({"state": AgentStatus.DONE.value, "phase": "idle", "tps":tps(), "loop": loop_guard, "max_loop": self.max_tool_loop})
                 break
 
         self.dump()

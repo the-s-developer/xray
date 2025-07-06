@@ -9,71 +9,137 @@ xray:
 # === MODELS ===
 models:
   - id: gpt-4.1-nano
+    model_id: gpt-4.1-nano
     label: gpt-4.1-nano 0.4$ (1M)
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
+    enable_tools: false
+
   - id: gpt-4.1-mini
+    model_id: gpt-4.1-mini
     label: gpt-4.1-mini 1.6$ (1M)
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
+    enable_tools: false
+
   - id: gpt-4.1
+    model_id: gpt-4.1
     label: gpt-4.1 8$ (1M)
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
+    enable_tools: false
+
   - id: gpt-4o
+    model_id: gpt-4o
     label: gpt-4o 10$ (128K)
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
+    enable_tools: false
+
   - id: gpt-4o-mini
+    model_id: gpt-4o-mini
     label: gpt-4o-mini 0.6$ (128K)
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
+    enable_tools: false
+
   - id: o4-mini
+    model_id: o4-mini
     label: o4-mini 4.4$ (200K)
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
-  - id: o3
-    label: o3 40$ (200K)
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_KEY}
-  - id: o3-mini
-    label: o3-mini 4.4$ (8K)
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_KEY}
-  - id: o1
-    label: o1 60$ (16K)
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_KEY}
+    enable_tools: false
+
   - id: o1-mini
+    model_id: o1-mini
     label: o1-mini 4.4$ (8K)
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_KEY}
+    enable_tools: false
 
+  - id: deepseek-r1-8b-ollama
+    model_id: deepseek-r1:8b
+    label: deepseek-r1:8b (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: no_key
+    enable_tools: false
 
-  - id:  qwen3:14b
-    label:  qwen3:14b (ollama)
+  - id: qwen3-14b-ollama
+    model_id: qwen3:14b
+    label: qwen3:14b (ollama)
     base_url: http://localhost:11434/v1
     api_key: "no_key"
-  - id:  hf.co/bartowski/deepcogito_cogito-v1-preview-qwen-32B-GGUF:Q4_K_M
-    label:  deepcogito_cogito-v1-preview-qwen-32B-GGUF:Q4_K_M (ollama)
-    base_url: http://localhost:11434/v1
-    api_key: "no_key"    
-  - id: devstral:24b
-    label: mistral devstral:24b (ollama)
+    enable_tools: false
+
+  - id: qwen3-32b-ollama
+    model_id: qwen3:32b
+    label: qwen3:32b (ollama)
     base_url: http://localhost:11434/v1
     api_key: "no_key"
-  - id: cogito:32b
+    enable_tools: false
+  
+  - id: am-thinking-32b-ollama
+    model_id: a-m-team/AM-Thinking-v1
+    label: a-m-team/AM-Thinking-v1 (ollama)
+    base_url: http://localhost:11434/v1
+    api_key: "no_key"
+    enable_tools: false
+
+  - id: qwen3-32b-ollama-95
+    model_id: qwen3:32b
+    label: qwen3:32b (ollama-95)
+    base_url: http://192.168.99.95:11434/v1
+    api_key: "no_key"
+    enable_tools: false
+  
+  - id: am-thinking-32b-ollama-95
+    model_id: a-m-team/AM-Thinking-v1
+    label: a-m-team/AM-Thinking-v1 (ollama-95)
+    base_url: http://192.168.99.95:11434/v1
+    api_key: "no_key"
+    enable_tools: false
+
+  - id: cogito-32b-ollama
+    model_id: cogito:32b
     label: cogito:32b (ollama)
     base_url: http://localhost:11434/v1
     api_key: "no_key"
-  - id: qwen2.5:32b
-    label: qwen2.5:32b (ollama)
+    enable_tools: false
+
+  - id: devstral-24b-ollama
+    model_id: devstral:24b
+    label: mistral devstral:24b (ollama)
     base_url: http://localhost:11434/v1
     api_key: "no_key"
-  - id: /root/.cache/llama.cpp/Qwen_Qwen3-32B-GGUF_Qwen3-14B-Q4_K_M.gguf
+    enable_tools: false
+
+  - id: llamacpp-qwen3-14b
+    model_id: qwen3:14b
     label: Qwen_Qwen3-14B-GGUF_Qwen3-14B-Q4_K_M.gguf llamacpp
     base_url: http://192.168.99.96:8000/v1
     api_key: "no_key"
+    enable_tools: false
+
+  - id: deepseek-r1-distill-llama-70b-groq
+    model_id: deepseek-r1-distill-llama-70b
+    label: deepseek-r1-distill-llama-70b (groq)
+    base_url: https://api.groq.com/openai/v1
+    api_key: ${GROQ_API_KEY}
+    enable_tools: false
+
+  - id: meta-llama-4-maverick-17b-128e-instruct-groq
+    model_id: meta-llama/llama-4-maverick-17b-128e-instruct
+    label: meta-llama/llama-4-maverick-17b-128e-instruct (groq)
+    base_url: https://api.groq.com/openai/v1
+    api_key: ${GROQ_API_KEY}
+    enable_tools: false
+
+  - id: qwen-qwen3-32b-groq
+    model_id: qwen/qwen3-32b
+    label: qwen/qwen3-32b (groq)
+    base_url: https://api.groq.com/openai/v1
+    api_key: ${GROQ_API_KEY}
+    enable_tools: false
 
 # === TOOLS ===
 # tools:

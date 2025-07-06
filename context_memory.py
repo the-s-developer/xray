@@ -181,7 +181,7 @@ class ContextMemory:
      # ------------------------------------------------------------------
     # Refinement
     # ------------------------------------------------------------------
-    def refine(self) -> List[Dict[str, Any]]:
+    def refine(self,no_metadata=False) -> List[Dict[str, Any]]:
         """Return a *clean* view of the conversation buffer.
 
         If *dedup_tool_calls* is **True**, duplicate tool‑calls (identical
@@ -222,4 +222,9 @@ class ContextMemory:
             else:
                 seen.add(key)
 
-        return [m for i, m in enumerate(msgs) if i not in remove]
+        result= [m for i, m in enumerate(msgs) if i not in remove]
+        if no_metadata:
+            # Remove metadata from all messages
+            for m in result:    
+                m.pop("meta", None)
+        return result

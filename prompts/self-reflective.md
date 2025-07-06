@@ -43,8 +43,15 @@ with sync_playwright() as p:
 ----
 USER PROMPT:
 workflow:
-1. go haberler.com
-2. find technology news with images
-3. create scraper script
-5. execute and validate result, fix code if it is unsuccess
-6. iterate loop until successfull result
+go https://www.bubilet.com.tr/istanbul
+create scraper script to extract all items with detail
+execute and validate result, fix code if it is unsuccess
+format: 
+{
+    'title': '',
+    'location': '',
+    'date': '<IsoDate>',
+    'price': '₺',
+    'image': 'https://cdn.bubilet.com.tr/cdn-cgi/image/format=auto,width=3840/https://cdn.bubilet.com.tr/files/Etkinlik/jennifer-lopez-79171.png',
+    'url': '<full url of detail page>'
+}

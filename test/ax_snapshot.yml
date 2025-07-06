@@ -1,0 +1,939 @@
+role: WebArea
+name: T.C. İçişleri Bakanlığı Göç İdaresi Başkanlığı - Haberler
+children:
+- role: generic
+  children:
+  - role: none
+    children:
+    - role: generic
+      children:
+      - role: none
+        children:
+        - role: list
+          children:
+          - role: listitem
+            level: 1
+            children:
+            - role: link
+              name: e-Devlet
+              children:
+              - - text e-Devlet
+                - InlineTextBox
+              - - text 
+                - InlineTextBox
+          - role: listitem
+            level: 1
+            children:
+            - role: link
+              name: İçişleri Bakanlığı
+              children:
+              - - text İçişleri Bakanlığı
+                - InlineTextBox
+              - - text 
+                - InlineTextBox
+          - role: listitem
+            level: 1
+            children:
+            - role: link
+              name: TR 
+              haspopup: menu
+              children:
+              - - text TR
+                - InlineTextBox
+              - - text 
+                - InlineTextBox
+        - image
+      - role: navigation
+        children:
+        - role: link
+          name: Göç İdaresi Başkanlığı
+          children:
+          - image
+          - - text Göç İdaresi Başkanlığı
+            - InlineTextBox
+        - role: generic
+          children:
+          - role: list
+            children:
+            - role: listitem
+              level: 1
+              children:
+              - role: button
+                name: BAŞKANLIĞIMIZ 
+                haspopup: menu
+                children:
+                - - text BAŞKANLIĞIMIZ
+                  - InlineTextBox
+                - - text 
+                  - InlineTextBox
+            - role: listitem
+              level: 1
+              children:
+              - role: button
+                name: YABANCILAR 
+                haspopup: menu
+                children:
+                - - text YABANCILAR
+                  - InlineTextBox
+                - - text 
+                  - InlineTextBox
+            - role: listitem
+              level: 1
+              children:
+              - role: button
+                name: GÜNDEM 
+                haspopup: menu
+                children:
+                - - text GÜNDEM
+                  - InlineTextBox
+                - - text 
+                  - InlineTextBox
+            - role: listitem
+              level: 1
+              children:
+              - role: button
+                name: İSTATİSTİKLER 
+                haspopup: menu
+                children:
+                - - text İSTATİSTİKLER
+                  - InlineTextBox
+                - - text 
+                  - InlineTextBox
+            - role: listitem
+              level: 1
+              children:
+              - role: button
+                name: İLETİŞİM 
+                haspopup: menu
+                children:
+                - - text İLETİŞİM
+                  - InlineTextBox
+                - - text 
+                  - InlineTextBox
+          - role: link
+            name: 
+            haspopup: menu
+            children:
+            - - text 
+              - InlineTextBox
+    - role: none
+      children:
+      - role: none
+        children:
+        - role: heading
+          name: GÜNDEM
+          level: 6
+          children:
+          - role: link
+            name: GÜNDEM
+            children:
+            - - text GÜNDEM
+              - InlineTextBox
+        - role: list
+          children:
+          - role: listitem
+            level: 1
+            children:
+            - role: link
+              name: Haberler
+              children:
+              - - text Haberler
+                - InlineTextBox
+          - role: listitem
+            level: 1
+            children:
+            - role: link
+              name: Basın Açıklamaları
+              children:
+              - - text Basın Açıklamaları
+                - InlineTextBox
+          - role: listitem
+            level: 1
+            children:
+            - role: link
+              name: Duyurular
+              children:
+              - - text Duyurular
+                - InlineTextBox
+          - role: listitem
+            level: 1
+            children:
+            - role: link
+              name: İhaleler
+              children:
+              - - text İhaleler
+                - InlineTextBox
+      - role: generic
+        children:
+        - role: heading
+          name: Haberler    
+          level: 2
+          children:
+          - - text Haberler
+            - InlineTextBox
+          - role: none
+            children:
+            - role: link
+              name: 
+              children:
+              - - text 
+                - InlineTextBox
+            - role: link
+              name: 
+              children:
+              - - text 
+                - InlineTextBox
+            - role: button
+              name: 
+              haspopup: menu
+              children:
+              - - text 
+                - InlineTextBox
+            - role: link
+              name: 
+              children:
+              - - text 
+                - InlineTextBox
+        - role: generic
+          children:
+          - role: button
+            name: Tarih aralığı seçiniz) 
+            haspopup: menu
+            children:
+            - - text Tarih aralığı seçiniz)
+              - InlineTextBox
+            - - text 
+              - InlineTextBox
+          - role: none
+            children:
+            - role: link
+              name: İçişleri Bakanı Ali Yerlikaya, Sofya'da, "Bulgaristan, Yunanistan,
+                Türkiye Üçlü Bakanlar Görüşmesi"ne Katıldı  26.06.2025 İçişleri Bakanı
+                Ali Yerlikaya, Sofya'da, "Bulgaristan, Yunanistan, Türkiye Üçlü Bakanlar
+                Görüşmesi"ne Katıldı İçişleri Bakanı Ali Yerlikaya, Bulgaristan'ın
+                başkenti Sofya'da, "Bulgaristan, Yunanistan, Türkiye Üçlü Bakanlar
+                Görüşmesi"ne katıldı.Toplantıda, Göç İdaresi Başkanı Hüseyin Kök de
+                yer aldı.
+              children:
+              - role: image
+                name: İçişleri Bakanı Ali Yerlikaya, Sofya'da, "Bulgaristan, Yunanistan,
+                  Türkiye Üçlü Bakanlar Görüşmesi"ne Katıldı
+                description: İçişleri Bakanı Ali Yerlikaya, Sofya'da, "Bulgaristan,
+                  Yunanistan, Türkiye Üçlü Bakanlar Görüşmesi"ne Katıldı
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 26.06.2025
+                  level: 6
+                  children:
+                  - - text 26.06.2025
+                    - InlineTextBox
+                - role: heading
+                  name: İçişleri Bakanı Ali Yerlikaya, Sofya'da, "Bulgaristan, Yunanistan,
+                    Türkiye Üçlü Bakanlar Görüşmesi"ne Katıldı
+                  level: 5
+                  children:
+                  - - text İçişleri Bakanı Ali Yerlikaya, Sofya'da, "Bulgaristan,
+                      Yunanistan, Türkiye Üçlü Bakanlar Görüşmesi"ne Katıldı
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text İçişleri Bakanı Ali Yerlikaya, Bulgaristan'ın başkenti
+                      Sofya'da, "Bulgaristan, Yunanistan, Türkiye Üçlü Bakanlar Görüşmesi"ne
+                      katıldı.Toplantıda, Göç İdaresi Başkanı Hüseyin Kök de yer aldı.
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+            - role: link
+              name: Ülke Genelinde Düzenlenen Denetimlerde 15 Göçmen Kaçakçısı, 446
+                Düzensiz Göçmen Yakalandı  21.06.2025 Ülke Genelinde Düzenlenen Denetimlerde
+                15 Göçmen Kaçakçısı, 446 Düzensiz Göçmen Yakalandı Ülke genelinde
+                göçmen kaçakçılığı organizatörleri ve düzensiz göçe yönelik düzenlenen
+                denetimler ile ilgili açıklama yapan İçişleri Bakanı Ali Yerlikaya,
+                15 göçmen kaçakçısı ve 446 düzensiz göçmenin yakalandığını açıkladı.
+              children:
+              - role: image
+                name: Ülke Genelinde Düzenlenen Denetimlerde 15 Göçmen Kaçakçısı,
+                  446 Düzensiz Göçmen Yakalandı
+                description: Ülke Genelinde Düzenlenen Denetimlerde 15 Göçmen Kaçakçısı,
+                  446 Düzensiz Göçmen Yakalandı
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 21.06.2025
+                  level: 6
+                  children:
+                  - - text 21.06.2025
+                    - InlineTextBox
+                - role: heading
+                  name: Ülke Genelinde Düzenlenen Denetimlerde 15 Göçmen Kaçakçısı,
+                    446 Düzensiz Göçmen Yakalandı
+                  level: 5
+                  children:
+                  - - text Ülke Genelinde Düzenlenen Denetimlerde 15 Göçmen Kaçakçısı,
+                      446 Düzensiz Göçmen Yakalandı
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text Ülke genelinde göçmen kaçakçılığı organizatörleri ve düzensiz
+                      göçe yönelik düzenlenen denetimler ile ilgili açıklama yapan
+                      İçişleri Bakanı Ali Yerlikaya, 15 göçmen kaçakçısı ve 446 düzensiz
+                      göçmenin yakalandığını açıkladı.
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+            - role: link
+              name: Kurban Bayramı Boyunca Gerçekleştirilen Denetimlerde 745 Düzensiz
+                Göçmen Tespit Edildi  13.06.2025 Kurban Bayramı Boyunca Gerçekleştirilen
+                Denetimlerde 745 Düzensiz Göçmen Tespit Edildi Düzensiz göç ve göçmen
+                kaçakçılarıyla mücadele Kurban Bayramı boyunca da kesintisiz devam
+                etti. Kurban Bayramı'nda (6-7-8-9 Haziran 2025 tarihlerinde) Mobil
+                Göç Noktası Araçlarıyla gerçekleştirilen denetimlerde 745 düzensiz
+                göçmen tespit edildi.
+              children:
+              - role: image
+                name: Kurban Bayramı Boyunca Gerçekleştirilen Denetimlerde 745 Düzensiz
+                  Göçmen Tespit Edildi
+                description: Kurban Bayramı Boyunca Gerçekleştirilen Denetimlerde
+                  745 Düzensiz Göçmen Tespit Edildi
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 13.06.2025
+                  level: 6
+                  children:
+                  - - text 13.06.2025
+                    - InlineTextBox
+                - role: heading
+                  name: Kurban Bayramı Boyunca Gerçekleştirilen Denetimlerde 745 Düzensiz
+                    Göçmen Tespit Edildi
+                  level: 5
+                  children:
+                  - - text Kurban Bayramı Boyunca Gerçekleştirilen Denetimlerde 745
+                      Düzensiz Göçmen Tespit Edildi
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text Düzensiz göç ve göçmen kaçakçılarıyla mücadele Kurban Bayramı
+                      boyunca da kesintisiz devam etti. Kurban Bayramı'nda (6-7-8-9
+                      Haziran 2025 tarihlerinde) Mobil Göç Noktası Araçlarıyla gerçekleştirilen
+                      denetimlerde 745 düzensiz göçmen tespit edildi.
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+            - role: link
+              name: 51 İlde Düzenlenen Denetimlerde 273 Göçmen Kaçakçısı, 1.022 Düzensiz
+                Göçmen Yakalandı  11.06.2025 51 İlde Düzenlenen Denetimlerde 273
+                Göçmen Kaçakçısı, 1.022 Düzensiz Göçmen Yakalandı İçişleri Bakanı
+                Ali Yerlikaya, 51 ilde göçmen kaçakçılığı organizatörleri ve düzensiz
+                göçe yönelik düzenlenen denetimlerde, 273 göçmen kaçakçısı ve 1.022
+                düzensiz göçmenin yakalandığını açıkladı.
+              children:
+              - role: image
+                name: 51 İlde Düzenlenen Denetimlerde 273 Göçmen Kaçakçısı, 1.022
+                  Düzensiz Göçmen Yakalandı
+                description: 51 İlde Düzenlenen Denetimlerde 273 Göçmen Kaçakçısı,
+                  1.022 Düzensiz Göçmen Yakalandı
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 11.06.2025
+                  level: 6
+                  children:
+                  - - text 11.06.2025
+                    - InlineTextBox
+                - role: heading
+                  name: 51 İlde Düzenlenen Denetimlerde 273 Göçmen Kaçakçısı, 1.022
+                    Düzensiz Göçmen Yakalandı
+                  level: 5
+                  children:
+                  - - text 51 İlde Düzenlenen Denetimlerde 273 Göçmen Kaçakçısı, 1.022
+                      Düzensiz Göçmen Yakalandı
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text İçişleri Bakanı Ali Yerlikaya, 51 ilde göçmen kaçakçılığı
+                      organizatörleri ve düzensiz göçe yönelik düzenlenen denetimlerde,
+                      273 göçmen kaçakçısı ve 1.022 düzensiz göçmenin yakalandığını
+                      açıkladı.
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+            - role: link
+              name: İçişleri Bakanı Ali Yerlikaya KKTC Göç Yönetim Merkezi Açılışına
+                Katıldı  31.05.2025 İçişleri Bakanı Ali Yerlikaya KKTC Göç Yönetim
+                Merkezi Açılışına Katıldı İçişleri Bakanı Ali Yerlikaya, Kuzey Kıbrıs
+                Türk Cumhuriyeti’nde (KKTC) yapımı tamamlanan Göç Yönetim Merkezi’nin
+                açılışına katıldı.
+              children:
+              - role: image
+                name: İçişleri Bakanı Ali Yerlikaya KKTC Göç Yönetim Merkezi Açılışına
+                  Katıldı
+                description: İçişleri Bakanı Ali Yerlikaya KKTC Göç Yönetim Merkezi
+                  Açılışına Katıldı
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 31.05.2025
+                  level: 6
+                  children:
+                  - - text 31.05.2025
+                    - InlineTextBox
+                - role: heading
+                  name: İçişleri Bakanı Ali Yerlikaya KKTC Göç Yönetim Merkezi Açılışına
+                    Katıldı
+                  level: 5
+                  children:
+                  - - text İçişleri Bakanı Ali Yerlikaya KKTC Göç Yönetim Merkezi
+                      Açılışına Katıldı
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text İçişleri Bakanı Ali Yerlikaya, Kuzey Kıbrıs Türk Cumhuriyeti’nde
+                      (KKTC) yapımı tamamlanan Göç Yönetim Merkezi’nin açılışına katıldı.
+                    - InlineTextBox
+                    - InlineTextBox
+            - role: link
+              name: İçişleri Bakanı Ali Yerlikaya, 2016 Yılından İtibaren Ülkesine
+                Gönüllü Geri Dönüş Yapan Suriyeli Sayısının 1 Milyona Ulaştığını Açıkladı
+                 28.05.2025 İçişleri Bakanı Ali Yerlikaya, 2016 Yılından İtibaren
+                Ülkesine Gönüllü Geri Dönüş Yapan Suriyeli Sayısının 1 Milyona Ulaştığını
+                Açıkladı İçişleri Bakanı Ali Yerlikaya, 2016 yılından itibaren gönüllü,
+                güvenli, onurlu ve düzenli bir şekilde ülkesine dönen Suriyeli sayısının
+                1 milyona ulaştığını açıkladı.
+              children:
+              - role: image
+                name: İçişleri Bakanı Ali Yerlikaya, 2016 Yılından İtibaren Ülkesine
+                  Gönüllü Geri Dönüş Yapan Suriyeli Sayısının 1 Milyona Ulaştığını
+                  Açıkladı
+                description: İçişleri Bakanı Ali Yerlikaya, 2016 Yılından İtibaren
+                  Ülkesine Gönüllü Geri Dönüş Yapan Suriyeli Sayısının 1 Milyona Ulaştığını
+                  Açıkladı
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 28.05.2025
+                  level: 6
+                  children:
+                  - - text 28.05.2025
+                    - InlineTextBox
+                - role: heading
+                  name: İçişleri Bakanı Ali Yerlikaya, 2016 Yılından İtibaren Ülkesine
+                    Gönüllü Geri Dönüş Yapan Suriyeli Sayısının 1 Milyona Ulaştığını
+                    Açıkladı
+                  level: 5
+                  children:
+                  - - text İçişleri Bakanı Ali Yerlikaya, 2016 Yılından İtibaren Ülkesine
+                      Gönüllü Geri Dönüş Yapan Suriyeli Sayısının 1 Milyona Ulaştığını
+                      Açıkladı
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text İçişleri Bakanı Ali Yerlikaya, 2016 yılından itibaren gönüllü,
+                      güvenli, onurlu ve düzenli bir şekilde ülkesine dönen Suriyeli
+                      sayısının 1 milyona ulaştığını açıkladı.
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+            - role: link
+              name: Ülkemiz Düzensiz Göçe Hedef Olmaktan ve Transit Göç Rotası Olmaktan
+                Çıktı  22.05.2025 Ülkemiz Düzensiz Göçe Hedef Olmaktan ve Transit
+                Göç Rotası Olmaktan Çıktı Ülke genelinde göçmen kaçakçılığı organizatörleri
+                ve düzensiz göçe yönelik düzenlenen denetimler ile ilgili açıklama
+                yapan İçişleri Bakanı Ali Yerlikaya, “Ülkemiz Düzensiz Göçe Hedef
+                Olmaktan ve Transit Göç Rotası Olmaktan Çıktı” dedi. 
+              children:
+              - role: image
+                name: Ülkemiz Düzensiz Göçe Hedef Olmaktan ve Transit Göç Rotası Olmaktan
+                  Çıktı
+                description: Ülkemiz Düzensiz Göçe Hedef Olmaktan ve Transit Göç Rotası
+                  Olmaktan Çıktı
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 22.05.2025
+                  level: 6
+                  children:
+                  - - text 22.05.2025
+                    - InlineTextBox
+                - role: heading
+                  name: Ülkemiz Düzensiz Göçe Hedef Olmaktan ve Transit Göç Rotası
+                    Olmaktan Çıktı
+                  level: 5
+                  children:
+                  - - text Ülkemiz Düzensiz Göçe Hedef Olmaktan ve Transit Göç Rotası
+                      Olmaktan Çıktı
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text Ülke genelinde göçmen kaçakçılığı organizatörleri ve düzensiz
+                      göçe yönelik düzenlenen denetimler ile ilgili açıklama yapan
+                      İçişleri Bakanı Ali Yerlikaya, “Ülkemiz Düzensiz Göçe Hedef
+                      Olmaktan ve Transit Göç Rotası Olmaktan Çıktı” dedi. 
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+            - role: link
+              name: '"İl Göç İdaresi Müdürleri Sınır Yönetimi Çalıştayı” Mersin’de
+                Gerçekleştirildi  16.05.2025 "İl Göç İdaresi Müdürleri Sınır Yönetimi
+                Çalıştayı” Mersin’de Gerçekleştirildi İl Göç İdaresi Müdürleri Sınır
+                Yönetimi Çalıştayı’nın açılışı Mersin Valisi Atilla Toros ve Göç İdaresi
+                Başkanı Hüseyin Kök’ün katılımıyla gerçekleştirildi.'
+              children:
+              - role: image
+                name: '"İl Göç İdaresi Müdürleri Sınır Yönetimi Çalıştayı” Mersin’de
+                  Gerçekleştirildi'
+                description: '"İl Göç İdaresi Müdürleri Sınır Yönetimi Çalıştayı”
+                  Mersin’de Gerçekleştirildi'
+              - role: generic
+                children:
+                - - text 
+                  - InlineTextBox
+                - role: heading
+                  name: 16.05.2025
+                  level: 6
+                  children:
+                  - - text 16.05.2025
+                    - InlineTextBox
+                - role: heading
+                  name: '"İl Göç İdaresi Müdürleri Sınır Yönetimi Çalıştayı” Mersin’de
+                    Gerçekleştirildi'
+                  level: 5
+                  children:
+                  - - text "İl Göç İdaresi Müdürleri Sınır Yönetimi Çalıştayı” Mersin’de
+                      Gerçekleştirildi
+                    - InlineTextBox
+                    - InlineTextBox
+                - role: paragraph
+                  children:
+                  - - text İl Göç İdaresi Müdürleri Sınır Yönetimi Çalıştayı’nın açılışı
+                      Mersin Valisi Atilla Toros ve Göç İdaresi Başkanı Hüseyin Kök’ün
+                      katılımıyla gerçekleştirildi.
+                    - InlineTextBox
+                    - InlineTextBox
+                    - InlineTextBox
+          - role: link
+            name: Daha fazla göster
+            children:
+            - - text 
+              - InlineTextBox
+            - - text Daha fazla göster
+              - InlineTextBox
+    - role: none
+      children:
+      - - text  
+        - InlineTextBox
+      - role: none
+        children:
+        - role: none
+          children:
+          - role: none
+            children:
+            - role: none
+              children:
+              - role: heading
+                name: BAŞKANLIĞIMIZ
+                level: 3
+                children:
+                - - text BAŞKANLIĞIMIZ
+                  - InlineTextBox
+              - role: list
+                children:
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Göç İdaresi Başkanlığı
+                    children:
+                    - - text Göç İdaresi Başkanlığı
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Yöneticilerimiz
+                    children:
+                    - - text Yöneticilerimiz
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Teşkilat 
+                    children:
+                    - - text Teşkilat
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Kurumsal 
+                    children:
+                    - - text Kurumsal
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Göç Kurulu
+                    children:
+                    - - text Göç Kurulu
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Mevzuat 
+                    children:
+                    - - text Mevzuat
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Yayınlar 
+                    children:
+                    - - text Yayınlar
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Projelerimiz 
+                    children:
+                    - - text Projelerimiz
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Kariyer İmkanı 
+                    children:
+                    - - text Kariyer İmkanı
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+            - role: none
+              children:
+              - role: heading
+                name: YABANCILAR
+                level: 3
+                children:
+                - - text YABANCILAR
+                  - InlineTextBox
+              - role: list
+                children:
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Düzenli Göç 
+                    children:
+                    - - text Düzenli Göç
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Düzensiz Göç
+                    children:
+                    - - text Düzensiz Göç
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Uluslararası Koruma
+                    children:
+                    - - text Uluslararası Koruma
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Geçici Koruma
+                    children:
+                    - - text Geçici Koruma
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Gönüllü, Güvenli, Onurlu ve Düzenli Geri Dönüş
+                    children:
+                    - - text Gönüllü, Güvenli, Onurlu ve Düzenli Geri Dönüş
+                      - InlineTextBox
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: İnsan Ticareti İle Mücadele
+                    children:
+                    - - text İnsan Ticareti İle Mücadele
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Uyum ve İletişim
+                    children:
+                    - - text Uyum ve İletişim
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Sıkça Sorulan Sorular 
+                    children:
+                    - - text Sıkça Sorulan Sorular
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+            - role: generic
+              children:
+              - role: none
+                children:
+                - role: heading
+                  name: GÜNDEM
+                  level: 3
+                  children:
+                  - - text GÜNDEM
+                    - InlineTextBox
+                - role: list
+                  children:
+                  - role: listitem
+                    level: 1
+                    children:
+                    - role: link
+                      name: Haberler
+                      children:
+                      - - text Haberler
+                        - InlineTextBox
+                  - role: listitem
+                    level: 1
+                    children:
+                    - role: link
+                      name: Basın Açıklamaları
+                      children:
+                      - - text Basın Açıklamaları
+                        - InlineTextBox
+                  - role: listitem
+                    level: 1
+                    children:
+                    - role: link
+                      name: Duyurular
+                      children:
+                      - - text Duyurular
+                        - InlineTextBox
+                  - role: listitem
+                    level: 1
+                    children:
+                    - role: link
+                      name: İhaleler
+                      children:
+                      - - text İhaleler
+                        - InlineTextBox
+              - role: none
+                children:
+                - role: heading
+                  name: İSTATİSTİKLER
+                  level: 3
+                  children:
+                  - - text İSTATİSTİKLER
+                    - InlineTextBox
+                - role: list
+                  children:
+                  - role: listitem
+                    level: 1
+                    children:
+                    - role: link
+                      name: İstatistikler
+                      children:
+                      - - text İstatistikler
+                        - InlineTextBox
+                  - role: listitem
+                    level: 1
+                    children:
+                    - role: link
+                      name: Raporlar
+                      children:
+                      - - text Raporlar
+                        - InlineTextBox
+            - role: none
+              children:
+              - role: heading
+                name: İLETİŞİM
+                level: 3
+                children:
+                - - text İLETİŞİM
+                  - InlineTextBox
+              - role: list
+                children:
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Başkanlık İletişim
+                    children:
+                    - - text Başkanlık İletişim
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Merkez Teşkilatı
+                    children:
+                    - - text Merkez Teşkilatı
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Taşra Teşkilatı 
+                    children:
+                    - - text Taşra Teşkilatı
+                      - InlineTextBox
+                    - - text 
+                      - InlineTextBox
+                - role: listitem
+                  level: 1
+                  children:
+                  - role: link
+                    name: Yabancılar İletişim Merkezi
+                    children:
+                    - - text Yabancılar İletişim Merkezi
+                      - InlineTextBox
+          - role: generic
+            children:
+            - role: none
+              children:
+              - role: paragraph
+                children:
+                - - text Göç İdaresi Başkanlığını Takip Edin
+                  - InlineTextBox
+              - role: generic
+                children:
+                - role: link
+                  name:  
+                  children:
+                  - role: none
+                    children:
+                    - - text 
+                      - InlineTextBox
+                    - - text  
+                      - InlineTextBox
+                - role: link
+                  children:
+                  - image
+                - role: link
+                  name:  
+                  children:
+                  - role: none
+                    children:
+                    - - text 
+                      - InlineTextBox
+                    - - text  
+                      - InlineTextBox
+                - role: link
+                  name:  
+                  children:
+                  - role: none
+                    children:
+                    - - text 
+                      - InlineTextBox
+                    - - text  
+                      - InlineTextBox
+            - role: none
+              children:
+              - role: paragraph
+                children:
+                - - text Göç İdaresi Başkanlığı
+                  - InlineTextBox
+              - - text +90 312 422 05 00 - Santral
+                - InlineTextBox
+            - role: none
+              children:
+              - role: LineBreak
+                name: '
+
+                  '
+                children:
+                - InlineTextBox
+              - role: link
+                name: Gizlilik ve Telif
+                children:
+                - - text Gizlilik ve Telif
+                  - InlineTextBox
+            - role: none
+              children:
+              - role: paragraph
+                children:
+                - - text Personel İçin
+                  - InlineTextBox
+              - role: link
+                name:  Kurumsal E-Posta
+                children:
+                - role: none
+                  children:
+                  - - text 
+                    - InlineTextBox
+                  - - text  
+                    - InlineTextBox
+                - - text Kurumsal E-Posta
+                  - InlineTextBox
+        - - text  © 2025 Göç İdaresi Başkanlığı
+          - InlineTextBox
+  - role: alert
+    children:
+    - - text Sizlere daha iyi hizmet verebilmek için sitemizde çerezlere yer veriyoruz
+      - InlineTextBox
+    - - 'text  🍪 Çerez politikamız hakkında bilgi edinmek için '
+      - InlineTextBox
+    - role: link
+      name: tıklayınız
+      children:
+      - - text tıklayınız
+        - InlineTextBox
+    - role: button
+      name: Kabul et
+      children:
+      - - text Kabul et
+        - InlineTextBox
